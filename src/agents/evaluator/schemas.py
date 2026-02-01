@@ -5,6 +5,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+# Default evaluator configured in Keywords AI dashboard
+DEFAULT_EVALUATOR_ID = "05887584fc104d27af141c07d704415c"
+
 
 class EvaluatorConfig(BaseModel):
     """Configuration for a single evaluator."""

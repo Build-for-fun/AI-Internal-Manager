@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agents.evaluator.agent import evaluator_agent
 from src.agents.evaluator.schemas import (
+    DEFAULT_EVALUATOR_ID,
     BatchEvaluationResponse,
     EvaluationResponse,
     EvaluationStatus,
@@ -37,10 +38,10 @@ class EvaluateRequest(BaseModel):
         description="The prompt messages that generated the completion",
         examples=[[{"role": "user", "content": "Say hello"}]],
     )
-    evaluator_slugs: list[str] = Field(
-        ...,
-        description="List of evaluator slugs to run (configured in Keywords AI)",
-        examples=[["tone-checker", "grammar-validator"]],
+    evaluator_slugs: list[str] | None = Field(
+        None,
+        description="List of evaluator slugs to run. Defaults to the configured evaluator.",
+        examples=[["05887584fc104d27af141c07d704415c"]],
     )
     ideal_output: str | None = Field(
         None,
@@ -75,9 +76,9 @@ class GenerateAndEvaluateRequest(BaseModel):
             {"role": "user", "content": "What is 2+2?"},
         ]],
     )
-    evaluator_slugs: list[str] = Field(
-        ...,
-        description="List of evaluator slugs to run",
+    evaluator_slugs: list[str] | None = Field(
+        None,
+        description="List of evaluator slugs to run. Defaults to the configured evaluator.",
     )
     ideal_output: str | None = Field(
         None,

@@ -774,7 +774,7 @@ const styles: { [key: string]: React.CSSProperties } = {
   },
   statsGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(4, 1fr)',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
     gap: 'var(--space-lg)',
   },
   statCard: {
@@ -800,10 +800,13 @@ const styles: { [key: string]: React.CSSProperties } = {
     display: 'flex',
     flexDirection: 'column',
     gap: 'var(--space-xs)',
+    minWidth: 0,
+    flex: 1,
   },
   statLabel: {
     fontSize: '0.8125rem',
     color: 'var(--text-muted)',
+    whiteSpace: 'nowrap',
   },
   statValue: {
     display: 'flex',

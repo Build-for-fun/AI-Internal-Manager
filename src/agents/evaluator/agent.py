@@ -15,6 +15,7 @@ from openai import AsyncOpenAI
 
 from src.agents.base import BaseAgent
 from src.agents.evaluator.schemas import (
+    DEFAULT_EVALUATOR_ID,
     BatchEvaluationRequest,
     BatchEvaluationResponse,
     EvalInputs,
@@ -148,16 +149,9 @@ Be concise and actionable in your responses."""
         Returns:
             EvaluationResponse with results from all evaluators
         """
+        # Use default evaluator if none specified
         if not evaluator_slugs:
-            return EvaluationResponse(
-                status=EvaluationStatus.FAILED,
-                results=[EvaluationResult(
-                    evaluator_slug="",
-                    error="No evaluators specified",
-                )],
-                model=model or self.eval_model,
-                total_evaluators=0,
-            )
+            evaluator_slugs = [DEFAULT_EVALUATOR_ID]
 
         # Build evaluation request
         request = self._build_evaluation_request(
