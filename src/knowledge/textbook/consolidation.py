@@ -252,11 +252,24 @@ Create a comprehensive monthly summary that:
 Monthly Summary:"""
 
         if self.llm_provider == "keywords_ai":
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                max_tokens=1500,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            # Build request with caching parameters
+            kwargs: dict[str, Any] = {
+                "model": self.model,
+                "max_tokens": 1500,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+
+            # Add caching parameters if enabled
+            if settings.keywords_ai_cache_enabled:
+                kwargs["extra_body"] = {
+                    "cache_enabled": True,
+                    "cache_ttl": settings.keywords_ai_cache_ttl,
+                    "cache_options": {
+                        "cache_by_customer": settings.keywords_ai_cache_by_customer,
+                    },
+                }
+
+            response = await self.client.chat.completions.create(**kwargs)
             return response.choices[0].message.content
         else:
             response = await self.client.messages.create(

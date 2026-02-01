@@ -57,6 +57,11 @@ class Settings(BaseSettings):
     keywords_ai_base_url: str = "https://api.keywordsai.co/api/"
     keywords_ai_default_model: str = "gpt-4o"  # Default to GPT-4o for broader compatibility
 
+    # Keywords AI Caching
+    keywords_ai_cache_enabled: bool = True
+    keywords_ai_cache_ttl: int = 86400  # 24 hours in seconds (default is 30 days)
+    keywords_ai_cache_by_customer: bool = True  # Cache per customer identifier
+
     # LLM Provider
     llm_provider: Literal["anthropic", "keywords_ai"] = "anthropic"
 

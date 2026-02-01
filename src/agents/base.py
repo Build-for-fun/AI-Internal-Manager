@@ -136,6 +136,16 @@ class BaseAgent(ABC):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
 
+        # Add Keywords AI caching parameters
+        if settings.keywords_ai_cache_enabled:
+            kwargs["extra_body"] = {
+                "cache_enabled": True,
+                "cache_ttl": settings.keywords_ai_cache_ttl,
+                "cache_options": {
+                    "cache_by_customer": settings.keywords_ai_cache_by_customer,
+                },
+            }
+
         response = await self.client.chat.completions.create(**kwargs)
         message = response.choices[0].message
 

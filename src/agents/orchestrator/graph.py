@@ -169,14 +169,28 @@ async def direct_response_node(state: ConversationState) -> dict[str, Any]:
             api_key=settings.keywords_ai_api_key.get_secret_value(),
             base_url=settings.keywords_ai_base_url,
         )
-        response = await client.chat.completions.create(
-            model=settings.keywords_ai_default_model,
-            max_tokens=500,
-            messages=[
+
+        # Build request with caching parameters
+        kwargs: dict[str, Any] = {
+            "model": settings.keywords_ai_default_model,
+            "max_tokens": 500,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": query},
             ],
-        )
+        }
+
+        # Add caching parameters if enabled
+        if settings.keywords_ai_cache_enabled:
+            kwargs["extra_body"] = {
+                "cache_enabled": True,
+                "cache_ttl": settings.keywords_ai_cache_ttl,
+                "cache_options": {
+                    "cache_by_customer": settings.keywords_ai_cache_by_customer,
+                },
+            }
+
+        response = await client.chat.completions.create(**kwargs)
         response_text = response.choices[0].message.content
     else:
         client = AsyncAnthropic(api_key=settings.anthropic_api_key.get_secret_value())

@@ -1,14 +1,26 @@
 """Knowledge consolidation tasks for generating summaries."""
 
 import asyncio
+import os
 from datetime import datetime, timedelta
 from typing import Any
 
 import structlog
+from keywordsai_tracing.decorators import workflow, task
+from keywordsai_tracing.main import KeywordsAITelemetry
 
+from src.config import settings
 from workers.celery_app import app
 
 logger = structlog.get_logger()
+
+# Configure Keywords AI tracing environment variables from app settings
+# The keywordsai-tracing library expects KEYWORDSAI_API_KEY (no underscores)
+if settings.keywords_ai_api_key.get_secret_value():
+    os.environ["KEYWORDSAI_API_KEY"] = settings.keywords_ai_api_key.get_secret_value()
+    os.environ["KEYWORDSAI_BASE_URL"] = settings.keywords_ai_base_url.rstrip("/")
+
+_telemetry = KeywordsAITelemetry()
 
 
 def run_async(coro):
@@ -21,15 +33,20 @@ def run_async(coro):
         loop.close()
 
 
+@workflow(name="generate_weekly_summaries")
 @app.task(bind=True, max_retries=2, default_retry_delay=600)
 def generate_weekly_summaries(self):
     """Generate weekly summaries for all topics.
 
     Aggregates context nodes from the past week into summaries.
     """
-    return run_async(_generate_weekly_summaries())
+    try:
+        return run_async(_generate_weekly_summaries())
+    finally:
+        _telemetry.flush()
 
 
+@task(name="weekly_summary_consolidation")
 async def _generate_weekly_summaries():
     """Async implementation of weekly summary generation."""
     from src.knowledge.textbook.consolidation import consolidation_service
@@ -58,15 +75,20 @@ async def _generate_weekly_summaries():
         return {"status": "error", "message": str(e)}
 
 
+@workflow(name="generate_monthly_summaries")
 @app.task(bind=True, max_retries=2, default_retry_delay=600)
 def generate_monthly_summaries(self):
     """Generate monthly summaries for all topics.
 
     Aggregates weekly summaries from the past month.
     """
-    return run_async(_generate_monthly_summaries())
+    try:
+        return run_async(_generate_monthly_summaries())
+    finally:
+        _telemetry.flush()
 
 
+@task(name="monthly_summary_consolidation")
 async def _generate_monthly_summaries():
     """Async implementation of monthly summary generation."""
     from src.knowledge.textbook.consolidation import consolidation_service
@@ -95,12 +117,18 @@ async def _generate_monthly_summaries():
         return {"status": "error", "message": str(e)}
 
 
+@workflow(name="update_entity_importance")
 @app.task
 def update_entity_importance():
     """Update importance scores for entities based on mention frequency."""
-    return run_async(_update_entity_importance())
+    try:
+        return run_async(_update_entity_importance())
+    finally:
+        # Ensure traces are flushed after task completion
+        _telemetry.flush()
 
 
+@task(name="entity_importance_update")
 async def _update_entity_importance():
     """Async implementation of entity importance update."""
     from src.knowledge.textbook.consolidation import consolidation_service
@@ -122,12 +150,17 @@ async def _update_entity_importance():
         return {"status": "error", "message": str(e)}
 
 
+@workflow(name="generate_topic_summary")
 @app.task
 def generate_topic_summary(topic_id: str, summary_type: str = "weekly"):
     """Generate a summary for a specific topic."""
-    return run_async(_generate_topic_summary(topic_id, summary_type))
+    try:
+        return run_async(_generate_topic_summary(topic_id, summary_type))
+    finally:
+        _telemetry.flush()
 
 
+@task(name="topic_summary_generation")
 async def _generate_topic_summary(topic_id: str, summary_type: str):
     """Async implementation of single topic summary generation."""
     from src.knowledge.textbook.consolidation import consolidation_service
@@ -158,15 +191,20 @@ async def _generate_topic_summary(topic_id: str, summary_type: str):
         return {"status": "error", "message": str(e)}
 
 
+@workflow(name="cleanup_old_contexts")
 @app.task
 def cleanup_old_contexts(days_old: int = 90):
     """Archive or remove old context nodes.
 
     Keeps summaries but archives individual contexts older than threshold.
     """
-    return run_async(_cleanup_old_contexts(days_old))
+    try:
+        return run_async(_cleanup_old_contexts(days_old))
+    finally:
+        _telemetry.flush()
 
 
+@task(name="cleanup_old_contexts_async")
 async def _cleanup_old_contexts(days_old: int):
     """Async implementation of old context cleanup."""
     from src.knowledge.graph.client import neo4j_client
@@ -202,15 +240,20 @@ async def _cleanup_old_contexts(days_old: int):
         return {"status": "error", "message": str(e)}
 
 
+@workflow(name="rebuild_embeddings")
 @app.task
 def rebuild_embeddings(collection: str = "knowledge"):
     """Rebuild embeddings for all documents in a collection.
 
     Useful after embedding model updates.
     """
-    return run_async(_rebuild_embeddings(collection))
+    try:
+        return run_async(_rebuild_embeddings(collection))
+    finally:
+        _telemetry.flush()
 
 
+@task(name="rebuild_embeddings_async")
 async def _rebuild_embeddings(collection: str):
     """Async implementation of embedding rebuild."""
     from src.knowledge.graph.client import neo4j_client

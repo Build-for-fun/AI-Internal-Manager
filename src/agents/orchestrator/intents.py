@@ -8,6 +8,9 @@ from openai import AsyncOpenAI
 
 from src.config import settings
 
+# Type alias for keyword arguments
+KwargsDict = dict[str, Any]
+
 
 class Intent(str, Enum):
     """Possible intents for user queries."""
@@ -113,14 +116,27 @@ Response: knowledge|0.9
                 user_message += "\n[Context: User is currently in an onboarding flow]"
 
         if self.provider == "keywords_ai":
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
+            # Build Keywords AI request with caching
+            kwargs: dict[str, Any] = {
+                "model": self.model,
+                "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message},
                 ],
-                max_tokens=50,
-            )
+                "max_tokens": 50,
+            }
+
+            # Add caching parameters if enabled
+            if settings.keywords_ai_cache_enabled:
+                kwargs["extra_body"] = {
+                    "cache_enabled": True,
+                    "cache_ttl": settings.keywords_ai_cache_ttl,
+                    "cache_options": {
+                        "cache_by_customer": settings.keywords_ai_cache_by_customer,
+                    },
+                }
+
+            response = await self.client.chat.completions.create(**kwargs)
             result = response.choices[0].message.content.strip()
         else:
             response = await self.client.messages.create(
