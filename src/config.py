@@ -70,8 +70,15 @@ class Settings(BaseSettings):
 
     # Voice
     deepgram_api_key: SecretStr = Field(default=SecretStr(""))
-    elevenlabs_api_key: SecretStr = Field(default=SecretStr(""))
+    elevenlabs_api_key: SecretStr = Field(default=SecretStr("sk_d7ca2cd289670ae397f0f0ac7a2e70d3b2dc85d963bed00f"))
     elevenlabs_voice_id: str = "21m00Tcm4TlvDq8ikWAM"  # Rachel voice
+
+    # Zoom Integration
+    zoom_client_id: str = "MOi1sFS0RmyeVM8NYFk17w"
+    zoom_client_secret: SecretStr = Field(default=SecretStr("kvh4S5XK7WugtYUXO5qhhTRHAqz79o5Z"))
+    zoom_account_id: str = "Sc3YAF-4T2SQ5dqlGieKPg"
+    zoom_bot_jid: str = ""
+    zoom_webhook_secret: str = ""
 
     # External Services (MCP Connectors)
     jira_base_url: str = ""
