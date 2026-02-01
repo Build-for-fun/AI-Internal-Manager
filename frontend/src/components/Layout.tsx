@@ -1,5 +1,5 @@
 import { ReactNode, useMemo } from 'react'
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   LayoutDashboard,
@@ -13,8 +13,10 @@ import {
   Bell,
   Search,
   ChevronRight,
+  LogOut,
 } from 'lucide-react'
 import { useRbac } from '../contexts/RbacContext'
+import { useApiKey } from '../contexts/ApiKeyContext'
 
 interface LayoutProps {
   children: ReactNode
@@ -23,7 +25,7 @@ interface LayoutProps {
 }
 
 const navItems = [
-  { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
+  { path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   {
     path: '/chat',
     icon: MessageSquare,
@@ -57,7 +59,14 @@ const navItems = [
 
 export default function Layout({ children, voiceActive, setVoiceActive }: LayoutProps) {
   const location = useLocation()
+  const navigate = useNavigate()
   const { loading, user, permissions, roleOverride, setRoleOverride } = useRbac()
+  const { clearApiKey } = useApiKey()
+
+  const handleLogout = () => {
+    clearApiKey()
+    navigate('/')
+  }
 
   const allowedNavItems = useMemo(() => {
     if (loading) return navItems
@@ -209,6 +218,17 @@ export default function Layout({ children, voiceActive, setVoiceActive }: Layout
               whileTap={{ scale: 0.95 }}
             >
               <Settings size={18} />
+            </motion.button>
+
+            {/* Logout */}
+            <motion.button
+              style={styles.iconButton}
+              onClick={handleLogout}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              title="Logout"
+            >
+              <LogOut size={18} />
             </motion.button>
 
             {/* User avatar */}
