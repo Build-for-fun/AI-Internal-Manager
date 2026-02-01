@@ -34,8 +34,30 @@ class TeamAnalysisAgent(BaseAgent):
             name="team_analysis",
             description="Analyzes team health, performance, and collaboration patterns",
         )
-        # Get analytics tools
+        self._tools = []
+        self._internal_connector = None
+
+    async def _ensure_tools_loaded(self) -> None:
+        """Lazy load tools from internal analytics connector."""
+        if self._tools:
+            return
+
+        # First try registry
         self._tools = mcp_registry.get_tools_for_agent("team_analysis")
+        if self._tools:
+            logger.info("Loaded tools from MCP registry", tool_count=len(self._tools))
+            return
+
+        # Fall back to internal analytics connector
+        try:
+            from src.mcp.internal.connector import internal_analytics_connector
+            if not internal_analytics_connector.is_connected:
+                await internal_analytics_connector.connect()
+            self._internal_connector = internal_analytics_connector
+            self._tools = internal_analytics_connector.get_tools()
+            logger.info("Loaded tools from internal analytics connector", tool_count=len(self._tools))
+        except Exception as e:
+            logger.warning("Failed to load internal analytics tools", error=str(e))
 
     async def process(
         self,
@@ -50,37 +72,53 @@ class TeamAnalysisAgent(BaseAgent):
         - Bottleneck identification
         - Communication pattern analysis
         """
+        # Ensure tools are loaded
+        await self._ensure_tools_loaded()
+
         user_team = context.get("user_team")
         memory_context = context.get("memory_context", {})
 
         # Get team analytics context
         analytics_context = await self._get_analytics_context(user_team)
 
+        # Build tool descriptions for the prompt
+        tool_descriptions = "\n".join([
+            f"- {t.name}: {t.description}"
+            for t in self._tools
+        ]) if self._tools else "No tools available"
+
         # Build system prompt
         system = f"""You are a team analytics expert for an internal company system.
 Your role is to analyze team performance, identify issues, and provide actionable recommendations.
 
-ANALYSIS CAPABILITIES:
-1. Sprint velocity and completion rates
-2. Workload distribution across team members
-3. Code review and quality metrics
-4. Communication patterns and collaboration
-5. Bottleneck and blocker identification
+IMPORTANT: You have access to tools that can query real team data. ALWAYS use these tools to fetch actual data before responding. Do NOT provide generic advice - use the tools to get real metrics.
+
+AVAILABLE TOOLS:
+{tool_descriptions}
+
+INSTRUCTIONS:
+1. When asked about velocity, metrics, or team data, ALWAYS call the appropriate tool first
+2. Use get_team_velocity to fetch sprint velocity data
+3. Use get_team_metrics for detailed team performance metrics
+4. Use list_teams to see all available teams
+5. After getting the data, provide specific analysis with actual numbers
 
 CURRENT TEAM CONTEXT:
 {self._format_analytics_context(analytics_context)}
 
-AVAILABLE DATA SOURCES:
-- Jira: Sprint data, issues, blockers, workload
-- GitHub: PRs, reviews, code ownership, activity
-- Slack: Communication patterns, decisions, discussions
-
 GUIDELINES:
-1. Provide data-driven insights
-2. Be specific about numbers and trends
-3. Suggest actionable improvements
-4. Highlight both problems and successes
-5. Consider team dynamics and sustainability
+1. ALWAYS use tools to fetch real data - do not make up numbers
+2. Provide data-driven insights with specific metrics
+3. Calculate averages, trends, and comparisons from actual data
+4. Suggest actionable improvements based on the data
+5. Highlight both problems and successes
+
+RESPONSE FORMAT:
+- Use clear Markdown with headings.
+- Include a short executive summary (2-3 bullets).
+- Present metrics in a table when possible.
+- Separate sections for Data, Analysis, and Recommendations.
+- Keep sentences concise and avoid repetition.
 """
 
         # Build messages

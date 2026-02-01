@@ -64,6 +64,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Failed to connect to Redis", error=str(e))
 
+    # Initialize MCP connectors
+    try:
+        from src.mcp.registry import mcp_registry
+        from src.mcp.internal.connector import internal_analytics_connector
+
+        # Register internal analytics connector
+        mcp_registry.register(internal_analytics_connector)
+        await internal_analytics_connector.connect()
+        logger.info("Internal analytics connector initialized")
+    except Exception as e:
+        logger.warning("Failed to initialize MCP connectors", error=str(e))
+
     yield
 
     # Shutdown
