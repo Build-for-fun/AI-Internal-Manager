@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import structlog
 from anthropic import AsyncAnthropic
+from openai import AsyncOpenAI
 
 from src.config import settings
 from src.knowledge.graph.client import neo4j_client
@@ -23,7 +24,16 @@ class ConsolidationService:
     """Service for consolidating knowledge into summaries."""
 
     def __init__(self):
-        self.client = AsyncAnthropic(api_key=settings.anthropic_api_key.get_secret_value())
+        self.llm_provider = settings.llm_provider
+        if self.llm_provider == "keywords_ai":
+            self.client = AsyncOpenAI(
+                api_key=settings.keywords_ai_api_key.get_secret_value(),
+                base_url=settings.keywords_ai_base_url,
+            )
+            self.model = settings.keywords_ai_default_model
+        else:
+            self.client = AsyncAnthropic(api_key=settings.anthropic_api_key.get_secret_value())
+            self.model = settings.anthropic_default_model
 
     async def generate_weekly_summary(
         self,
@@ -241,13 +251,20 @@ Create a comprehensive monthly summary that:
 
 Monthly Summary:"""
 
-        response = await self.client.messages.create(
-            model=settings.anthropic_default_model,
-            max_tokens=1500,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        return response.content[0].text
+        if self.llm_provider == "keywords_ai":
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                max_tokens=1500,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return response.choices[0].message.content
+        else:
+            response = await self.client.messages.create(
+                model=self.model,
+                max_tokens=1500,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return response.content[0].text
 
     async def _create_summary_node(
         self,
