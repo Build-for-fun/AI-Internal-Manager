@@ -68,6 +68,13 @@ IMPORTANT GUIDELINES:
 4. Be concise but thorough.
 5. Use formatting (bullet points, headers) when helpful.
 
+RESPONSE FORMAT:
+- Use clear Markdown with headings.
+- Start with a brief summary (1-2 sentences).
+- Prefer bullet points for steps or lists.
+- Include a "Sources" section when citing documents.
+- Keep responses structured and scannable.
+
 CONTEXT FROM KNOWLEDGE BASE:
 {knowledge_context}
 

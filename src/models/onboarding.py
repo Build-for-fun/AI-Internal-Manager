@@ -5,7 +5,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base, TimestampMixin, UUIDMixin
@@ -67,7 +67,7 @@ class OnboardingProgress(Base, UUIDMixin, TimestampMixin):
 
     # Knowledge assessment scores
     assessment_scores: Mapped[dict[str, Any]] = mapped_column(
-        JSONB,
+        Base.JSON_TYPE,
         default=dict,
         nullable=False,
     )
@@ -124,7 +124,7 @@ class OnboardingTask(Base, UUIDMixin, TimestampMixin):
     # Completion details
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completion_data: Mapped[dict[str, Any]] = mapped_column(
-        JSONB,
+        Base.JSON_TYPE,
         default=dict,
         nullable=False,
     )

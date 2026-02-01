@@ -12,10 +12,15 @@ from typing import Any
 from uuid import uuid4
 
 import structlog
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agents.onboarding.agent import onboarding_agent
 from src.config import settings
+from src.models.conversation import Conversation, ConversationType, Message
+from src.models.database import get_db
+from src.models.user import User
 from src.schemas.onboarding import VoiceSessionRequest, VoiceSessionResponse
 
 logger = structlog.get_logger()
@@ -24,6 +29,30 @@ router = APIRouter()
 
 # Store active voice sessions
 active_sessions: dict[str, dict[str, Any]] = {}
+
+
+async def get_current_user(
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Get current user (dev placeholder)."""
+    stmt = select(User).limit(1)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if not user:
+        user = User(
+            id=str(uuid4()),
+            email="dev@example.com",
+            hashed_password="dev",
+            full_name="Development User",
+            role="Software Engineer",
+            department="Engineering",
+            team="Platform",
+        )
+        db.add(user)
+        await db.commit()
+
+    return user
 
 
 class DeepgramSTT:
@@ -162,15 +191,34 @@ tts_client = ElevenLabsTTS()
 @router.post("/sessions", response_model=VoiceSessionResponse)
 async def create_voice_session(
     request: VoiceSessionRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> VoiceSessionResponse:
     """Create a new voice session for onboarding."""
     session_id = str(uuid4())
+
+    conversation = Conversation(
+        id=str(uuid4()),
+        user_id=user.id,
+        title="Voice Onboarding Session",
+        conversation_type=ConversationType.VOICE.value,
+        conversation_metadata={
+            "topic": request.topic,
+            "resume": request.resume,
+            "user_role": request.user_role,
+        },
+    )
+    db.add(conversation)
+    await db.commit()
+    await db.refresh(conversation)
 
     active_sessions[session_id] = {
         "id": session_id,
         "topic": request.topic,
         "created_at": asyncio.get_event_loop().time(),
         "messages": [],
+        "conversation_id": conversation.id,
+        "user_id": user.id,
     }
 
     logger.info("Voice session created", session_id=session_id)
@@ -212,6 +260,7 @@ async def end_voice_session(session_id: str):
 async def voice_websocket(
     websocket: WebSocket,
     session_id: str,
+    db: AsyncSession = Depends(get_db),
 ):
     """WebSocket endpoint for voice streaming.
 
@@ -280,6 +329,16 @@ async def voice_websocket(
                 "content": user_text,
             })
 
+            db.add(
+                Message(
+                    id=str(uuid4()),
+                    conversation_id=session["conversation_id"],
+                    role="user",
+                    content=user_text,
+                )
+            )
+            await db.commit()
+
             # Process with onboarding agent
             result = await onboarding_agent.process(
                 query=user_text,
@@ -296,6 +355,17 @@ async def voice_websocket(
                 "role": "assistant",
                 "content": response_text,
             })
+
+            db.add(
+                Message(
+                    id=str(uuid4()),
+                    conversation_id=session["conversation_id"],
+                    role="assistant",
+                    content=response_text,
+                    agent="onboarding",
+                )
+            )
+            await db.commit()
 
             # Send text response
             await websocket.send_json({

@@ -24,6 +24,7 @@ from src.schemas.chat import (
 )
 from src.rbac.models import Role, UserContext, ResourceType, AccessLevel
 from src.rbac.guards import rbac_guard
+from src.observability.keywords_ai import log_keywords_ai_chat
 
 logger = structlog.get_logger()
 
@@ -282,6 +283,16 @@ async def send_message(
         },
     )
 
+    log_messages = formatted_messages + [{"role": "user", "content": request.message}]
+    asyncio.create_task(
+        log_keywords_ai_chat(
+            messages=log_messages,
+            output={"role": "assistant", "content": result["response"]},
+            customer_identifier=user.id,
+            model=orchestrator_agent.model,
+        )
+    )
+
     # Store assistant message
     assistant_message = Message(
         id=str(uuid4()),
@@ -343,6 +354,15 @@ async def websocket_chat(
                     },
                 )
 
+                asyncio.create_task(
+                    log_keywords_ai_chat(
+                        messages=[{"role": "user", "content": user_message}],
+                        output={"role": "assistant", "content": result["response"]},
+                        customer_identifier=user_id,
+                        model=orchestrator_agent.model,
+                    )
+                )
+
                 # Send response
                 await websocket.send_json({
                     "type": "message",
@@ -402,6 +422,15 @@ async def stream_message(
                 "user_department": user.department,
                 "messages": [],
             },
+        )
+
+        asyncio.create_task(
+            log_keywords_ai_chat(
+                messages=[{"role": "user", "content": request.message}],
+                output={"role": "assistant", "content": result["response"]},
+                customer_identifier=user.id,
+                model=orchestrator_agent.model,
+            )
         )
 
         # Simulate streaming by chunking the response

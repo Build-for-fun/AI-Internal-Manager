@@ -99,11 +99,22 @@ async def get_team_health(
     try:
         report = await team_analysis_agent.get_team_health(team_id, days)
 
+        generated_at = report.generated_at
+        generated_at_value = (
+            generated_at.isoformat()
+            if hasattr(generated_at, "isoformat")
+            else str(generated_at)
+        )
+        overall_health = report.overall_health
+        overall_health_value = (
+            overall_health.value if hasattr(overall_health, "value") else str(overall_health)
+        )
+
         return {
             "team_id": report.team_id,
             "team_name": report.team_name,
-            "generated_at": report.generated_at.isoformat(),
-            "overall_health": report.overall_health.value,
+            "generated_at": generated_at_value,
+            "overall_health": overall_health_value,
             "overall_score": report.overall_score,
             "metrics": [
                 {

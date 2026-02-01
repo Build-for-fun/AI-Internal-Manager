@@ -95,7 +95,14 @@ class EvaluatorAgent(BaseAgent):
 - Explain how to improve LLM outputs based on evaluation feedback
 - Configure evaluation parameters for optimal results
 
-Be concise and actionable in your responses."""
+        Be concise and actionable in your responses.
+
+        RESPONSE FORMAT:
+        - Use clear Markdown with headings.
+        - Start with a brief summary.
+        - Present metrics or scores in a table when possible.
+        - Separate sections for Findings and Recommendations.
+        - Keep wording crisp and avoid repetition."""
 
         messages = [
             {"role": "user", "content": query}

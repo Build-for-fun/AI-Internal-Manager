@@ -5,7 +5,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import DateTime, ForeignKey, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base, TimestampMixin, UUIDMixin
@@ -52,7 +52,7 @@ class Conversation(Base, UUIDMixin, TimestampMixin):
 
     # Metadata for the conversation
     conversation_metadata: Mapped[dict[str, Any]] = mapped_column(
-        JSONB,
+        Base.JSON_TYPE,
         default=dict,
         nullable=False,
     )
@@ -62,7 +62,7 @@ class Conversation(Base, UUIDMixin, TimestampMixin):
 
     # Conversation state for LangGraph
     state: Mapped[dict[str, Any]] = mapped_column(
-        JSONB,
+        Base.JSON_TYPE,
         default=dict,
         nullable=False,
     )
@@ -109,11 +109,11 @@ class Message(Base, UUIDMixin, TimestampMixin):
     agent: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Tool calls and results
-    tool_calls: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
-    tool_results: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
+    tool_calls: Mapped[list[dict[str, Any]] | None] = mapped_column(Base.JSON_TYPE, nullable=True)
+    tool_results: Mapped[list[dict[str, Any]] | None] = mapped_column(Base.JSON_TYPE, nullable=True)
 
     # Sources used for RAG responses
-    sources: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB, nullable=True)
+    sources: Mapped[list[dict[str, Any]] | None] = mapped_column(Base.JSON_TYPE, nullable=True)
 
     # Token usage
     input_tokens: Mapped[int | None] = mapped_column(nullable=True)
@@ -121,7 +121,7 @@ class Message(Base, UUIDMixin, TimestampMixin):
 
     # Message metadata
     message_metadata: Mapped[dict[str, Any]] = mapped_column(
-        JSONB,
+        Base.JSON_TYPE,
         default=dict,
         nullable=False,
     )

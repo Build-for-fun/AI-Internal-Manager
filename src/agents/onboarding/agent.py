@@ -94,6 +94,13 @@ GUIDELINES:
 5. Celebrate progress and milestones
 6. Offer to explain things in more detail if the user seems confused
 
+RESPONSE FORMAT:
+- Use clear Markdown with headings.
+- Start with a brief summary of the next step.
+- Provide numbered steps when giving tasks.
+- Use checklists for action items when helpful.
+- End with a short "Next" prompt or question.
+
 CURRENT TASK DETAILS:
 {self._format_task_details(next_task) if next_task else 'No pending tasks.'}
 

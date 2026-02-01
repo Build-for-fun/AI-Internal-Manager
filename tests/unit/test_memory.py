@@ -129,8 +129,7 @@ class TestMemoryManager:
         result = manager.format_context_for_prompt({})
         assert result == ""
 
-    @pytest.mark.asyncio
-    async def test_format_context_for_prompt(self, manager):
+    def test_format_context_for_prompt(self, manager):
         """Test formatting context for prompt."""
         context = {
             "short_term": {"context": {"topic": "deployment"}},
@@ -139,7 +138,7 @@ class TestMemoryManager:
             "org": [{"text": "Company policy on deployments"}],
         }
 
-        result = await manager.format_context_for_prompt(context)
+        result = manager.format_context_for_prompt(context)
 
         assert "deployment" in result
         assert "User" in result

@@ -3,7 +3,6 @@
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Boolean, String
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.models.base import Base, TimestampMixin, UUIDMixin
@@ -38,7 +37,7 @@ class User(Base, UUIDMixin, TimestampMixin):
 
     # Preferences stored as JSON
     preferences: Mapped[dict[str, Any]] = mapped_column(
-        JSONB,
+        Base.JSON_TYPE,
         default=dict,
         nullable=False,
     )
