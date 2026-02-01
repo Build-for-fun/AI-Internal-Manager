@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Search,
@@ -9,13 +9,13 @@ import {
   ChevronRight,
   FileText,
   Folder,
-  Users,
   Code,
   BookOpen,
   X,
   ExternalLink,
   Clock,
 } from 'lucide-react'
+import { useRbac } from '../contexts/RbacContext'
 
 interface Node {
   id: string
@@ -99,11 +99,20 @@ const typeIcons = {
 }
 
 export default function KnowledgeGraph() {
+  const { knowledgeScope } = useRbac()
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [zoom, setZoom] = useState(1)
   const [hoveredNode, setHoveredNode] = useState<string | null>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
+
+  const scopeLabel = (() => {
+    const filters = (knowledgeScope?.filters || {}) as Record<string, string>
+    if (filters.department_id) return `Department • ${filters.department_id}`
+    if (filters.team_id) return `Team • ${filters.team_id}`
+    if (filters.owner_id) return 'Personal'
+    return 'Company'
+  })()
 
   return (
     <div style={styles.container}>
@@ -130,6 +139,7 @@ export default function KnowledgeGraph() {
             >
               <Filter size={16} />
             </motion.button>
+            <span style={styles.scopePill}>Scope: {scopeLabel}</span>
             <div style={styles.zoomControls}>
               <motion.button
                 style={styles.toolbarBtn}
@@ -400,6 +410,16 @@ const styles: { [key: string]: React.CSSProperties } = {
     display: 'flex',
     alignItems: 'center',
     gap: 'var(--space-sm)',
+  },
+  scopePill: {
+    padding: '4px 10px',
+    borderRadius: '999px',
+    fontSize: '0.6875rem',
+    letterSpacing: '0.05em',
+    textTransform: 'uppercase',
+    background: 'rgba(0, 245, 212, 0.12)',
+    color: 'var(--cyan)',
+    border: '1px solid rgba(0, 245, 212, 0.25)',
   },
   toolbarBtn: {
     width: '32px',

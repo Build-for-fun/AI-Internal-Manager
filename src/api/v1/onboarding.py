@@ -12,6 +12,8 @@ from src.agents.onboarding.flows import ONBOARDING_FLOWS, get_flow_for_user
 from src.models.database import get_db
 from src.models.onboarding import OnboardingProgress, OnboardingTask
 from src.models.user import User
+from src.rbac.guards import rbac_guard
+from src.rbac.models import AccessLevel, ResourceType, Role, UserContext
 from src.schemas.onboarding import (
     OnboardingProgressResponse,
     OnboardingStartRequest,
@@ -52,9 +54,48 @@ async def get_current_user(
     return user
 
 
+def build_user_context(user: User) -> UserContext:
+    """Build RBAC context from user model."""
+    return UserContext(
+        user_id=user.id,
+        role=Role.from_string(user.role or "ic"),
+        team_id=user.team or "",
+        department_id=user.department or "",
+        organization_id="default",
+        email=user.email,
+        name=user.full_name,
+    )
+
+
+def enforce_onboarding_access(
+    *,
+    context: UserContext,
+    resource: ResourceType,
+    level: AccessLevel,
+) -> None:
+    """Enforce RBAC access for onboarding resources."""
+    try:
+        rbac_guard.require_access(
+            context=context,
+            resource=resource,
+            required_level=level,
+            resource_attrs={"owner_id": context.user_id},
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
 @router.get("/flows")
-async def list_flows():
+async def list_flows(
+    user: User = Depends(get_current_user),
+):
     """List available onboarding flows."""
+    context = build_user_context(user)
+    enforce_onboarding_access(
+        context=context,
+        resource=ResourceType.ONBOARDING_FLOWS,
+        level=AccessLevel.READ,
+    )
     return [
         {
             "id": flow.id,
@@ -69,8 +110,17 @@ async def list_flows():
 
 
 @router.get("/flows/{flow_id}")
-async def get_flow(flow_id: str):
+async def get_flow(
+    flow_id: str,
+    user: User = Depends(get_current_user),
+):
     """Get details of a specific onboarding flow."""
+    context = build_user_context(user)
+    enforce_onboarding_access(
+        context=context,
+        resource=ResourceType.ONBOARDING_FLOWS,
+        level=AccessLevel.READ,
+    )
     flow = ONBOARDING_FLOWS.get(flow_id)
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
@@ -104,6 +154,12 @@ async def start_onboarding(
     db: AsyncSession = Depends(get_db),
 ) -> OnboardingProgressResponse:
     """Start or restart the onboarding process."""
+    context = build_user_context(user)
+    enforce_onboarding_access(
+        context=context,
+        resource=ResourceType.ONBOARDING_PROGRESS,
+        level=AccessLevel.WRITE,
+    )
     result = await onboarding_agent.start_onboarding(
         user_id=user.id,
         role=user.role,
@@ -146,6 +202,12 @@ async def get_progress(
     db: AsyncSession = Depends(get_db),
 ) -> OnboardingProgressResponse:
     """Get current onboarding progress."""
+    context = build_user_context(user)
+    enforce_onboarding_access(
+        context=context,
+        resource=ResourceType.ONBOARDING_PROGRESS,
+        level=AccessLevel.READ,
+    )
     stmt = select(OnboardingProgress).where(
         OnboardingProgress.user_id == user.id
     )
@@ -193,6 +255,12 @@ async def get_task(
     db: AsyncSession = Depends(get_db),
 ) -> OnboardingTaskResponse:
     """Get details of a specific onboarding task."""
+    context = build_user_context(user)
+    enforce_onboarding_access(
+        context=context,
+        resource=ResourceType.ONBOARDING_PROGRESS,
+        level=AccessLevel.READ,
+    )
     # Get user's progress
     progress_stmt = select(OnboardingProgress).where(
         OnboardingProgress.user_id == user.id
@@ -225,6 +293,12 @@ async def update_task(
     db: AsyncSession = Depends(get_db),
 ) -> OnboardingTaskResponse:
     """Update an onboarding task status."""
+    context = build_user_context(user)
+    enforce_onboarding_access(
+        context=context,
+        resource=ResourceType.ONBOARDING_PROGRESS,
+        level=AccessLevel.WRITE,
+    )
     result = await onboarding_agent.complete_task(
         user_id=user.id,
         task_id=task_id,
@@ -252,6 +326,12 @@ async def complete_task(
     user: User = Depends(get_current_user),
 ):
     """Mark a task as completed."""
+    context = build_user_context(user)
+    enforce_onboarding_access(
+        context=context,
+        resource=ResourceType.ONBOARDING_PROGRESS,
+        level=AccessLevel.WRITE,
+    )
     result = await onboarding_agent.complete_task(
         user_id=user.id,
         task_id=task_id,

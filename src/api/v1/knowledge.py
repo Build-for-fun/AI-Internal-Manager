@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agents.knowledge.retrieval import hybrid_retriever
@@ -12,6 +13,9 @@ from src.knowledge.graph.client import neo4j_client
 from src.knowledge.graph.schema import NodeLabels
 from src.knowledge.textbook.hierarchy import hierarchy_manager
 from src.models.database import get_db
+from src.models.user import User
+from src.rbac.guards import rbac_guard
+from src.rbac.models import AccessLevel, ResourceType, Role, UserContext
 from src.schemas.knowledge import (
     GraphNode,
     HierarchyResponse,
@@ -28,9 +32,109 @@ logger = structlog.get_logger()
 router = APIRouter()
 
 
+async def get_current_user(
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Get current user from auth token (dev placeholder)."""
+    stmt = select(User).limit(1)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if not user:
+        user = User(
+            id=str(uuid4()),
+            email="dev@example.com",
+            hashed_password="dev",
+            full_name="Development User",
+            role="Software Engineer",
+            department="Engineering",
+            team="Platform",
+        )
+        db.add(user)
+        await db.commit()
+
+    return user
+
+
+def build_user_context(user: User) -> UserContext:
+    """Build RBAC context from user model."""
+    return UserContext(
+        user_id=user.id,
+        role=Role.from_string(user.role or "ic"),
+        team_id=user.team or "",
+        department_id=user.department or "",
+        organization_id="default",
+        email=user.email,
+        name=user.full_name,
+    )
+
+
+def enforce_knowledge_access(
+    *,
+    context: UserContext,
+    level: AccessLevel,
+    department_id: str | None = None,
+) -> tuple[dict[str, Any], str | None]:
+    """Enforce knowledge access and return scope filters + effective department."""
+    resources = [
+        ResourceType.KNOWLEDGE_GLOBAL,
+        ResourceType.KNOWLEDGE_DEPARTMENT,
+        ResourceType.KNOWLEDGE_TEAM,
+        ResourceType.KNOWLEDGE_PERSONAL,
+    ]
+
+    for resource in resources:
+        decision = rbac_guard.check_access(
+            context=context,
+            resource=resource,
+            required_level=level,
+            resource_attrs={
+                "owner_id": context.user_id,
+                "team_id": context.team_id,
+                "department_id": context.department_id,
+            },
+        )
+        if not decision.allowed:
+            continue
+
+        scope_filters = decision.scope_filters or {}
+        scoped_department = scope_filters.get("department_id")
+        if scoped_department:
+            if department_id and department_id != scoped_department:
+                raise HTTPException(status_code=403, detail="Department access denied")
+            return scope_filters, scoped_department
+
+        return scope_filters, department_id
+
+    raise HTTPException(status_code=403, detail="Knowledge access denied")
+
+
+def matches_scope(item: dict[str, Any], scope_filters: dict[str, Any]) -> bool:
+    """Check if an item matches RBAC scope filters."""
+    if not scope_filters:
+        return True
+
+    def get_attr(key: str) -> Any:
+        if key in item:
+            return item.get(key)
+        metadata = item.get("metadata") or {}
+        if isinstance(metadata, dict) and key in metadata:
+            return metadata.get(key)
+        return None
+
+    for key, value in scope_filters.items():
+        if key == "max_depth":
+            continue
+        if get_attr(key) != value:
+            return False
+
+    return True
+
+
 @router.post("/search", response_model=SearchResponse)
 async def search_knowledge(
     request: SearchRequest,
+    user: User = Depends(get_current_user),
 ) -> SearchResponse:
     """Semantic search across the knowledge base.
 
@@ -40,13 +144,24 @@ async def search_knowledge(
 
     start_time = time.time()
 
+    context = build_user_context(user)
+    scope_filters, scoped_department = enforce_knowledge_access(
+        context=context,
+        level=AccessLevel.READ,
+        department_id=request.department,
+    )
+
     # Perform hybrid search
     results = await hybrid_retriever.retrieve(
         query=request.query,
         top_k=request.limit,
-        department=request.department,
+        department=scoped_department,
         include_summaries=request.include_context,
     )
+
+    # Enforce scope filters (team/personal)
+    if scope_filters:
+        results = [r for r in results if matches_scope(r, scope_filters)]
 
     # Filter by minimum score
     filtered_results = [r for r in results if r.get("score", 0) >= request.min_score]
@@ -97,9 +212,16 @@ async def search_knowledge(
 @router.get("/graph/hierarchy", response_model=HierarchyResponse)
 async def get_hierarchy(
     department_id: str | None = None,
+    user: User = Depends(get_current_user),
 ) -> HierarchyResponse:
     """Get the textbook-style knowledge hierarchy."""
-    hierarchy = await hierarchy_manager.get_hierarchy(department_id)
+    context = build_user_context(user)
+    scope_filters, scoped_department = enforce_knowledge_access(
+        context=context,
+        level=AccessLevel.READ,
+        department_id=department_id,
+    )
+    hierarchy = await hierarchy_manager.get_hierarchy(scoped_department)
 
     # Convert to response format
     from src.schemas.knowledge import HierarchyNode
@@ -133,6 +255,18 @@ async def get_hierarchy(
         for d in hierarchy.get("departments", [])
     ]
 
+    max_depth = scope_filters.get("max_depth") if scope_filters else None
+    if isinstance(max_depth, int) and max_depth > 0:
+        def trim_depth(node, depth: int) -> None:
+            if depth >= max_depth:
+                node.children = []
+                return
+            for child in node.children:
+                trim_depth(child, depth + 1)
+
+        for dept in departments:
+            trim_depth(dept, 1)
+
     return HierarchyResponse(
         departments=departments,
         total_nodes=hierarchy.get("total_nodes", 0),
@@ -143,8 +277,11 @@ async def get_hierarchy(
 async def get_node(
     node_id: str,
     include_relationships: bool = False,
+    user: User = Depends(get_current_user),
 ) -> GraphNode:
     """Get a specific node from the knowledge graph."""
+    context = build_user_context(user)
+    scope_filters, _ = enforce_knowledge_access(context=context, level=AccessLevel.READ)
     node = await neo4j_client.get_node(node_id)
 
     if not node:
@@ -170,6 +307,9 @@ async def get_node(
     for key in ["id", "title", "content", "created_at", "updated_at"]:
         metadata.pop(key, None)
 
+    if not matches_scope({**node, "metadata": metadata}, scope_filters):
+        raise HTTPException(status_code=403, detail="Node access denied")
+
     return GraphNode(
         id=node.get("id", ""),
         node_type=node_type,
@@ -184,8 +324,11 @@ async def get_node(
 @router.post("/graph/node", response_model=GraphNode)
 async def create_node(
     request: NodeCreateRequest,
+    user: User = Depends(get_current_user),
 ) -> GraphNode:
     """Create a new node in the knowledge graph."""
+    context = build_user_context(user)
+    enforce_knowledge_access(context=context, level=AccessLevel.WRITE)
     # Map node type to label
     label_map = {
         NodeType.DEPARTMENT: NodeLabels.DEPARTMENT,
@@ -243,8 +386,11 @@ async def create_node(
 async def update_node(
     node_id: str,
     request: NodeUpdateRequest,
+    user: User = Depends(get_current_user),
 ) -> GraphNode:
     """Update a node in the knowledge graph."""
+    context = build_user_context(user)
+    enforce_knowledge_access(context=context, level=AccessLevel.WRITE)
     # Get existing node
     existing = await neo4j_client.get_node(node_id)
     if not existing:
@@ -274,8 +420,13 @@ async def update_node(
 
 
 @router.delete("/graph/node/{node_id}")
-async def delete_node(node_id: str):
+async def delete_node(
+    node_id: str,
+    user: User = Depends(get_current_user),
+):
     """Delete a node from the knowledge graph."""
+    context = build_user_context(user)
+    enforce_knowledge_access(context=context, level=AccessLevel.WRITE)
     success = await neo4j_client.delete_node(node_id)
 
     if not success:
@@ -288,8 +439,11 @@ async def delete_node(node_id: str):
 async def get_children(
     node_id: str,
     child_type: NodeType | None = None,
+    user: User = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """Get children of a node in the hierarchy."""
+    context = build_user_context(user)
+    scope_filters, _ = enforce_knowledge_access(context=context, level=AccessLevel.READ)
     label = None
     if child_type:
         label_map = {
@@ -301,14 +455,25 @@ async def get_children(
 
     children = await neo4j_client.get_children(node_id, label)
 
-    return [
-        {
-            "id": c.get("child", {}).get("id"),
-            "title": c.get("child", {}).get("title"),
+    filtered_children = []
+    for c in children:
+        child = c.get("child", {})
+        child_payload = {
+            "id": child.get("id"),
+            "title": child.get("title"),
             "labels": c.get("labels", []),
+            "metadata": child,
         }
-        for c in children
-    ]
+        if matches_scope(child_payload, scope_filters):
+            filtered_children.append(
+                {
+                    "id": child.get("id"),
+                    "title": child.get("title"),
+                    "labels": c.get("labels", []),
+                }
+            )
+
+    return filtered_children
 
 
 @router.get("/topics")
@@ -316,15 +481,22 @@ async def search_topics(
     q: str = Query(..., min_length=1),
     department_id: str | None = None,
     limit: int = 10,
+    user: User = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """Search for topics by name."""
+    context = build_user_context(user)
+    scope_filters, scoped_department = enforce_knowledge_access(
+        context=context,
+        level=AccessLevel.READ,
+        department_id=department_id,
+    )
     topics = await hierarchy_manager.search_topics(
         query_text=q,
-        department_id=department_id,
+        department_id=scoped_department,
         limit=limit,
     )
 
-    return topics
+    return [t for t in topics if matches_scope(t, scope_filters)]
 
 
 @router.get("/topics/{topic_id}/contexts")
@@ -332,12 +504,15 @@ async def get_topic_contexts(
     topic_id: str,
     source_type: str | None = None,
     limit: int = 50,
+    user: User = Depends(get_current_user),
 ) -> list[dict[str, Any]]:
     """Get context nodes for a topic."""
+    context = build_user_context(user)
+    scope_filters, _ = enforce_knowledge_access(context=context, level=AccessLevel.READ)
     contexts = await hierarchy_manager.get_contexts_for_topic(
         topic_id=topic_id,
         limit=limit,
         source_type=source_type,
     )
 
-    return contexts
+    return [c for c in contexts if matches_scope(c, scope_filters)]

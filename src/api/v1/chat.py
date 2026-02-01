@@ -22,10 +22,44 @@ from src.schemas.chat import (
     MessageResponse,
     StreamChunk,
 )
+from src.rbac.models import Role, UserContext, ResourceType, AccessLevel
+from src.rbac.guards import rbac_guard
 
 logger = structlog.get_logger()
 
 router = APIRouter()
+
+
+def build_user_context(user: User) -> UserContext:
+    """Build RBAC context from user model."""
+    return UserContext(
+        user_id=user.id,
+        role=Role.from_string(user.role or "ic"),
+        team_id=user.team or "",
+        department_id=user.department or "",
+        organization_id="default",
+        email=user.email,
+        name=user.full_name,
+    )
+
+
+def enforce_access(
+    *,
+    context: UserContext,
+    resource: ResourceType,
+    level: AccessLevel,
+    resource_attrs: dict[str, Any] | None = None,
+) -> None:
+    """Enforce RBAC access with HTTP-friendly errors."""
+    try:
+        rbac_guard.require_access(
+            context=context,
+            resource=resource,
+            required_level=level,
+            resource_attrs=resource_attrs,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
 # Dependency to get current user (simplified - would use JWT in production)
@@ -64,6 +98,13 @@ async def create_conversation(
     db: AsyncSession = Depends(get_db),
 ) -> Conversation:
     """Create a new conversation."""
+    context = build_user_context(user)
+    enforce_access(
+        context=context,
+        resource=ResourceType.CHAT,
+        level=AccessLevel.WRITE,
+        resource_attrs={"owner_id": user.id},
+    )
     conversation = Conversation(
         id=str(uuid4()),
         user_id=user.id,
@@ -92,6 +133,13 @@ async def list_conversations(
     db: AsyncSession = Depends(get_db),
 ) -> list[Conversation]:
     """List user's conversations."""
+    context = build_user_context(user)
+    enforce_access(
+        context=context,
+        resource=ResourceType.CHAT_HISTORY,
+        level=AccessLevel.READ,
+        resource_attrs={"owner_id": user.id},
+    )
     stmt = (
         select(Conversation)
         .where(Conversation.user_id == user.id)
@@ -111,6 +159,13 @@ async def get_conversation(
     db: AsyncSession = Depends(get_db),
 ) -> Conversation:
     """Get a specific conversation."""
+    context = build_user_context(user)
+    enforce_access(
+        context=context,
+        resource=ResourceType.CHAT_HISTORY,
+        level=AccessLevel.READ,
+        resource_attrs={"owner_id": user.id},
+    )
     stmt = select(Conversation).where(
         Conversation.id == conversation_id,
         Conversation.user_id == user.id,
@@ -132,6 +187,13 @@ async def get_messages(
     db: AsyncSession = Depends(get_db),
 ) -> list[Message]:
     """Get messages in a conversation."""
+    context = build_user_context(user)
+    enforce_access(
+        context=context,
+        resource=ResourceType.CHAT_HISTORY,
+        level=AccessLevel.READ,
+        resource_attrs={"owner_id": user.id},
+    )
     # Verify conversation belongs to user
     conv_stmt = select(Conversation).where(
         Conversation.id == conversation_id,
@@ -161,6 +223,13 @@ async def send_message(
     db: AsyncSession = Depends(get_db),
 ) -> ChatResponse:
     """Send a message and get a response (non-streaming)."""
+    context = build_user_context(user)
+    enforce_access(
+        context=context,
+        resource=ResourceType.CHAT,
+        level=AccessLevel.WRITE,
+        resource_attrs={"owner_id": user.id},
+    )
     # Get conversation
     conv_stmt = select(Conversation).where(
         Conversation.id == conversation_id,

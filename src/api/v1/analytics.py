@@ -2,13 +2,18 @@
 
 from datetime import datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agents.team_analysis.agent import team_analysis_agent
 from src.models.database import get_db
+from src.models.user import User
+from src.rbac.guards import rbac_guard
+from src.rbac.models import AccessLevel, ResourceType, Role, UserContext
 from src.schemas.analytics import (
     Bottleneck,
     BottleneckAnalysisRequest,
@@ -24,12 +29,73 @@ logger = structlog.get_logger()
 router = APIRouter()
 
 
+async def get_current_user(
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """Get current user (dev placeholder)."""
+    stmt = select(User).limit(1)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if not user:
+        user = User(
+            id=str(uuid4()),
+            email="dev@example.com",
+            hashed_password="dev",
+            full_name="Development User",
+            role="Software Engineer",
+            department="Engineering",
+            team="Platform",
+        )
+        db.add(user)
+        await db.commit()
+
+    return user
+
+
+def build_user_context(user: User) -> UserContext:
+    """Build RBAC context from user model."""
+    return UserContext(
+        user_id=user.id,
+        role=Role.from_string(user.role or "ic"),
+        team_id=user.team or "",
+        department_id=user.department or "",
+        organization_id="default",
+        email=user.email,
+        name=user.full_name,
+    )
+
+
+def enforce_analytics_access(
+    *,
+    context: UserContext,
+    team_id: str,
+) -> None:
+    """Enforce RBAC access to analytics resources."""
+    try:
+        rbac_guard.require_access(
+            context=context,
+            resource=ResourceType.TEAM_ANALYTICS,
+            required_level=AccessLevel.READ,
+            resource_attrs={
+                "team_id": team_id,
+                "department_id": context.department_id,
+                "owner_id": context.user_id,
+            },
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
 @router.get("/team/{team_id}/health")
 async def get_team_health(
     team_id: str,
     days: int = Query(default=14, ge=1, le=90),
+    user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Get team health score and metrics."""
+    context = build_user_context(user)
+    enforce_analytics_access(context=context, team_id=team_id)
     try:
         report = await team_analysis_agent.get_team_health(team_id, days)
 
@@ -63,8 +129,11 @@ async def get_team_health(
 async def get_team_velocity(
     team_id: str,
     sprints: int = Query(default=5, ge=1, le=20),
+    user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Get team velocity metrics across recent sprints."""
+    context = build_user_context(user)
+    enforce_analytics_access(context=context, team_id=team_id)
     from src.mcp.jira.connector import jira_connector
 
     try:
@@ -128,8 +197,11 @@ async def get_team_velocity(
 @router.get("/team/{team_id}/bottlenecks")
 async def get_team_bottlenecks(
     team_id: str,
+    user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Get identified bottlenecks for a team."""
+    context = build_user_context(user)
+    enforce_analytics_access(context=context, team_id=team_id)
     try:
         bottlenecks = await team_analysis_agent.identify_bottlenecks(team_id)
 
@@ -153,8 +225,11 @@ async def get_team_bottlenecks(
 async def analyze_bottlenecks(
     team_id: str,
     request: BottleneckAnalysisRequest,
+    user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Run detailed bottleneck analysis."""
+    context = build_user_context(user)
+    enforce_analytics_access(context=context, team_id=team_id)
     bottlenecks = []
 
     # Analyze code review bottlenecks
@@ -233,8 +308,11 @@ async def analyze_bottlenecks(
 @router.get("/team/{team_id}/workload")
 async def get_team_workload(
     team_id: str,
+    user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Get workload distribution for team members."""
+    context = build_user_context(user)
+    enforce_analytics_access(context=context, team_id=team_id)
     from src.mcp.jira.connector import jira_connector
 
     try:

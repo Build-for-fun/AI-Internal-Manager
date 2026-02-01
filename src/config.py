@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     voyage_model: str = "voyage-large-2"
     openai_api_key: SecretStr = Field(default=SecretStr(""))
     openai_embedding_model: str = "text-embedding-3-large"
-    embedding_dimension: int = 1024
+    embedding_dimension: int = 1536  # voyage-large-2 produces 1536 dimensions
 
     # Voice
     deepgram_api_key: SecretStr = Field(default=SecretStr(""))

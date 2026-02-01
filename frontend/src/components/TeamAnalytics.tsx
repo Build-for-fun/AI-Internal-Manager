@@ -18,15 +18,14 @@ import {
   TrendingDown,
   Users,
   GitPullRequest,
-  Clock,
   AlertTriangle,
-  CheckCircle,
   Activity,
   Calendar,
   ChevronDown,
   ArrowRight,
   Zap,
 } from 'lucide-react'
+import { useRbac } from '../contexts/RbacContext'
 
 const velocityData = [
   { sprint: 'S1', planned: 45, completed: 42 },
@@ -92,8 +91,11 @@ const teamMembers = [
 const teams = ['All Teams', 'Platform', 'Backend', 'Frontend', 'DevOps']
 
 export default function TeamAnalytics() {
+  const { dashboard } = useRbac()
   const [selectedTeam, setSelectedTeam] = useState('All Teams')
   const [timeRange, setTimeRange] = useState('This Sprint')
+
+  const scopeLevel = dashboard?.data_scope?.level
 
   return (
     <div style={styles.container}>
@@ -103,6 +105,9 @@ export default function TeamAnalytics() {
           <h2 style={styles.title}>Team Analytics</h2>
           <p style={styles.subtitle}>Monitor team health, velocity, and bottlenecks</p>
         </div>
+        {scopeLevel && (
+          <span style={styles.scopeBadge}>Scope: {String(scopeLevel).toUpperCase()}</span>
+        )}
         <div style={styles.filters}>
           <div style={styles.dropdown}>
             <Users size={16} />
@@ -494,6 +499,16 @@ const styles: { [key: string]: React.CSSProperties } = {
     display: 'flex',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
+  },
+  scopeBadge: {
+    padding: '6px 12px',
+    borderRadius: '999px',
+    fontSize: '0.6875rem',
+    letterSpacing: '0.05em',
+    textTransform: 'uppercase',
+    background: 'rgba(0, 245, 212, 0.12)',
+    color: 'var(--cyan)',
+    border: '1px solid rgba(0, 245, 212, 0.25)',
   },
   title: {
     fontSize: '1.5rem',

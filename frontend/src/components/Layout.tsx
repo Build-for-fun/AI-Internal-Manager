@@ -1,4 +1,4 @@
-import { ReactNode } from 'react'
+import { ReactNode, useMemo } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -14,6 +14,7 @@ import {
   Search,
   ChevronRight,
 } from 'lucide-react'
+import { useRbac } from '../contexts/RbacContext'
 
 interface LayoutProps {
   children: ReactNode
@@ -23,14 +24,50 @@ interface LayoutProps {
 
 const navItems = [
   { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
-  { path: '/chat', icon: MessageSquare, label: 'Chat' },
-  { path: '/knowledge', icon: Network, label: 'Knowledge' },
-  { path: '/analytics', icon: BarChart3, label: 'Analytics' },
-  { path: '/onboarding', icon: GraduationCap, label: 'Onboarding' },
+  {
+    path: '/chat',
+    icon: MessageSquare,
+    label: 'Chat',
+    requiresAny: ['chat'],
+  },
+  {
+    path: '/knowledge',
+    icon: Network,
+    label: 'Knowledge',
+    requiresAny: [
+      'knowledge_global',
+      'knowledge_department',
+      'knowledge_team',
+      'knowledge_personal',
+    ],
+  },
+  {
+    path: '/analytics',
+    icon: BarChart3,
+    label: 'Analytics',
+    requiresAny: ['team_analytics'],
+  },
+  {
+    path: '/onboarding',
+    icon: GraduationCap,
+    label: 'Onboarding',
+    requiresAny: ['onboarding_flows', 'onboarding_progress'],
+  },
 ]
 
 export default function Layout({ children, voiceActive, setVoiceActive }: LayoutProps) {
   const location = useLocation()
+  const { loading, user, permissions, roleOverride, setRoleOverride } = useRbac()
+
+  const allowedNavItems = useMemo(() => {
+    if (loading) return navItems
+    return navItems.filter((item) => {
+      if (!item.requiresAny) return true
+      return permissions.some((p) => item.requiresAny?.includes(p.resource))
+    })
+  }, [loading, permissions])
+
+  const activeLabel = allowedNavItems.find((item) => item.path === location.pathname)?.label
 
   return (
     <div style={styles.container}>
@@ -48,7 +85,7 @@ export default function Layout({ children, voiceActive, setVoiceActive }: Layout
         </div>
 
         <nav style={styles.nav}>
-          {navItems.map((item) => {
+          {allowedNavItems.map((item) => {
             const isActive = location.pathname === item.path
             return (
               <NavLink key={item.path} to={item.path} style={{ textDecoration: 'none' }}>
@@ -106,7 +143,7 @@ export default function Layout({ children, voiceActive, setVoiceActive }: Layout
             <span style={styles.breadcrumbText}>Mission Control</span>
             <ChevronRight size={14} style={{ opacity: 0.4 }} />
             <span style={styles.breadcrumbCurrent}>
-              {navItems.find((item) => item.path === location.pathname)?.label || 'Dashboard'}
+              {activeLabel || 'Dashboard'}
             </span>
           </div>
 
@@ -120,6 +157,25 @@ export default function Layout({ children, voiceActive, setVoiceActive }: Layout
                 style={styles.searchInput}
               />
               <kbd style={styles.searchKbd}>⌘K</kbd>
+            </div>
+
+            {/* Role switcher */}
+            <div style={styles.roleSwitcher}>
+              <span style={styles.roleLabel}>Role</span>
+              <select
+                value={roleOverride || ''}
+                onChange={(e) =>
+                  setRoleOverride(e.target.value ? e.target.value : null)
+                }
+                style={styles.roleSelect}
+              >
+                <option value="">Auto</option>
+                <option value="ceo">CEO</option>
+                <option value="leadership">Leadership</option>
+                <option value="manager">Manager</option>
+                <option value="ic">IC</option>
+                <option value="new_employee">Intern</option>
+              </select>
             </div>
 
             {/* Voice toggle */}
@@ -156,8 +212,14 @@ export default function Layout({ children, voiceActive, setVoiceActive }: Layout
             </motion.button>
 
             {/* User avatar */}
-            <div style={styles.userAvatar}>
-              <span>KD</span>
+            <div style={styles.userMeta}>
+              <div style={styles.userAvatar}>
+                <span>{user?.name?.slice(0, 2).toUpperCase() || 'AI'}</span>
+              </div>
+              <div style={styles.userInfo}>
+                <span style={styles.userName}>{user?.name || 'Access Pending'}</span>
+                <span style={styles.userRole}>{user?.role || '...'}</span>
+              </div>
             </div>
           </div>
         </header>
@@ -367,6 +429,29 @@ const styles: { [key: string]: React.CSSProperties } = {
     border: '1px solid var(--border)',
     fontFamily: 'var(--font-mono)',
   },
+  roleSwitcher: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'var(--space-xs)',
+    padding: '6px 10px',
+    borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--border)',
+    background: 'var(--surface)',
+  },
+  roleLabel: {
+    fontSize: '0.6875rem',
+    letterSpacing: '0.08em',
+    textTransform: 'uppercase',
+    color: 'var(--text-muted)',
+  },
+  roleSelect: {
+    background: 'transparent',
+    border: 'none',
+    color: 'var(--text-primary)',
+    fontSize: '0.8125rem',
+    cursor: 'pointer',
+    outline: 'none',
+  },
   iconButton: {
     width: '36px',
     height: '36px',
@@ -413,6 +498,26 @@ const styles: { [key: string]: React.CSSProperties } = {
     fontSize: '0.75rem',
     fontWeight: 600,
     color: 'var(--void)',
+  },
+  userMeta: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'var(--space-sm)',
+  },
+  userInfo: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+  },
+  userName: {
+    fontSize: '0.8125rem',
+    color: 'var(--text-primary)',
+  },
+  userRole: {
+    fontSize: '0.6875rem',
+    color: 'var(--text-muted)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
   },
   content: {
     flex: 1,

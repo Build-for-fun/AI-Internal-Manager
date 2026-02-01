@@ -192,6 +192,16 @@ class AccessPolicy:
     priority: int = 0  # Higher priority policies override lower ones
     enabled: bool = True
 
+    def allows(self, required_level: AccessLevel) -> bool:
+        """Check if this policy's access level allows the required access level."""
+        level_hierarchy = {
+            AccessLevel.NONE: 0,
+            AccessLevel.READ: 1,
+            AccessLevel.WRITE: 2,
+            AccessLevel.ADMIN: 3,
+        }
+        return level_hierarchy[self.access_level] >= level_hierarchy[required_level]
+
     def evaluate(self, context: UserContext, resource_attrs: dict[str, Any]) -> bool:
         """
         Evaluate if this policy permits access given context and resource attributes.
