@@ -1,0 +1,25 @@
+# Ignore backend Python code
+src/
+tests/
+workers/
+alembic/
+docker/
+*.py
+requirements*.txt
+pyproject.toml
+setup.py
+Dockerfile
+.env
+.env.*
+
+# Ignore other non-frontend files
+*.md
+.git/
+.github/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
