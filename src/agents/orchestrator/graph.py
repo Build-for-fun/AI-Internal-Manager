@@ -184,7 +184,15 @@ async def direct_response_node(state: ConversationState) -> dict[str, Any]:
 
     query = state["current_query"]
     user_name = state.get("user_name", "there")
-    system_prompt = f"You are a friendly AI assistant for internal company use. The user's name is {user_name}. Keep responses brief and friendly."
+    system_prompt = (
+        "You are a friendly AI assistant for internal company use. "
+        f"The user's name is {user_name}. Keep responses brief and friendly.\n\n"
+        "RESPONSE FORMAT:\n"
+        "- Use clear Markdown with headings when helpful.\n"
+        "- Start with a brief summary (1-2 sentences).\n"
+        "- Prefer bullets for lists or steps.\n"
+        "- Keep responses structured and scannable."
+    )
 
     if settings.llm_provider == "keywords_ai":
         client = AsyncOpenAI(
@@ -233,7 +241,14 @@ async def direct_response_node(state: ConversationState) -> dict[str, Any]:
 async def clarification_node(state: ConversationState) -> dict[str, Any]:
     """Node that asks for clarification."""
     return {
-        "response": "I'd like to help, but I'm not sure I understand your request. Could you please provide more details about what you're looking for?",
+        "response": (
+            "## Clarification Needed\n"
+            "I want to help, but I need a bit more detail.\n\n"
+            "**Could you clarify one of these?**\n"
+            "- The specific team, project, or timeframe\n"
+            "- The exact metric or output you want\n"
+            "- Any constraints or context to consider"
+        ),
         "active_agent": "clarification",
     }
 

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -14,6 +14,9 @@ from src.config import Settings
 from src.main import app
 from src.models.base import Base
 from src.models.database import get_db
+from src.config import settings
+from src.rbac.guards import rbac_guard
+from src.rbac.models import AccessDecision, AccessLevel
 
 
 # Test settings override
@@ -27,6 +30,25 @@ def test_settings() -> Settings:
         anthropic_api_key="test-api-key",
         debug=True,
     )
+
+
+@pytest.fixture(autouse=True)
+def force_anthropic_provider(monkeypatch):
+    """Force anthropic provider for deterministic unit tests."""
+    monkeypatch.setattr(settings, "llm_provider", "anthropic", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def allow_all_rbac(monkeypatch):
+    """Bypass RBAC checks in tests to focus on API behavior."""
+    def _allow_access(*, context, resource, required_level=AccessLevel.READ, resource_attrs=None):
+        return AccessDecision.allow(
+            policy_id="test-allow",
+            resource=resource,
+            access_level=required_level,
+        )
+
+    monkeypatch.setattr(rbac_guard, "require_access", _allow_access)
 
 
 # Event loop for async tests
@@ -102,7 +124,8 @@ async def async_client(override_get_db) -> AsyncGenerator[AsyncClient, None]:
     """Create async test client."""
     app.dependency_overrides[get_db] = override_get_db
 
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 
     app.dependency_overrides.clear()

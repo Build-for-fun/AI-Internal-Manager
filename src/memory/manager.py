@@ -95,7 +95,7 @@ class MemoryManager:
 
         return context
 
-    async def format_context_for_prompt(
+    def format_context_for_prompt(
         self,
         context: dict[str, Any],
         max_tokens: int = 2000,

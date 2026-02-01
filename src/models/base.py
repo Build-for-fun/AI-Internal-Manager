@@ -4,16 +4,17 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import DateTime, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import DateTime, JSON, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
     """Base class for all models."""
 
+    JSON_TYPE = JSONB().with_variant(JSON, "sqlite")
     type_annotation_map = {
-        dict[str, Any]: "JSONB",
+        dict[str, Any]: JSON_TYPE,
     }
 
 

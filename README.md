@@ -1,4 +1,4 @@
-# AI Internal Manager
+# NexusAI: Internal Knowledge Manager
 
 A multi-agent AI system for internal company knowledge management, team analytics, and employee onboarding.
 
@@ -10,26 +10,88 @@ A multi-agent AI system for internal company knowledge management, team analytic
 - **Voice Onboarding**: Voice-enabled onboarding using Deepgram STT and ElevenLabs TTS
 - **Team Analytics**: Health metrics, velocity tracking, and bottleneck detection
 
-## Architecture
+## Technical Design
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     ORCHESTRATOR AGENT                          │
-│  [Intent Classifier] → [Router] → [State Manager (LangGraph)]   │
-└───────────────────────────┬─────────────────────────────────────┘
-            ┌───────────────┼───────────────┬───────────────┐
-            ▼               ▼               ▼               ▼
-   ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-   │  Knowledge  │  │  Onboarding │  │    Team     │  │   Direct    │
-   │    Agent    │  │    Agent    │  │  Analysis   │  │  Response   │
-   └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └─────────────┘
-          └─────────────────┼─────────────────┘
-                            ▼
-   ┌─────────────────────────────────────────────────────────────────┐
-   │                     SHARED SERVICES LAYER                       │
-   │  [Memory Manager]  [MCP Registry]  [Knowledge Graph]  [Tools]   │
-   └─────────────────────────────────────────────────────────────────┘
-```
+### System Diagram
+
+![System Diagram](images/arch.png)
+
+### Design Overview
+
+The system is a multi-agent, service-oriented architecture built around a LangGraph orchestrator. The FastAPI layer provides REST and WebSocket endpoints that handle user sessions, authentication, and request routing. Each request flows through an intent classifier and router to choose the right agent and tools, ensuring low-latency paths for direct responses and deeper pipelines for knowledge retrieval or analytics.
+
+### Request Lifecycle
+
+1. **Client request** hits the FastAPI gateway (REST or WebSocket).
+2. **Orchestrator** classifies intent and routes to a specialized agent.
+3. **Agent execution** uses tools and shared services (memory, knowledge, MCP connectors).
+4. **LLM calls** are handled through Keywords AI (OpenAI-compatible proxy), with model selection controlled by configuration.
+5. **Response streaming** returns partial tokens for chat and voice workflows.
+
+### Data and Storage
+
+- **Supabase Postgres** is the primary system of record for users, conversations, onboarding flows, and analytics.
+- **Neo4j** stores hierarchical knowledge and relationships (textbook-style graph).
+- **Qdrant** indexes embeddings for fast semantic retrieval.
+- **Redis** provides low-latency caching and backs Celery queues.
+
+This separation optimizes for query patterns: transactional records in Postgres, graph traversal in Neo4j, and vector similarity in Qdrant.
+
+### Agent and Memory Model
+
+- **Orchestrator** maintains session state and manages tool access using a shared memory interface.
+- **Short-term memory** stores the immediate conversation context.
+- **Org/team/user memory** enables durable personalization and cross-session continuity.
+- **Knowledge agent** resolves facts by combining graph traversal and semantic retrieval.
+
+### Ingestion and Knowledge Indexing
+
+- **MCP connectors** pull data from GitHub/Jira/Slack on schedules or user demand.
+- **Indexing pipeline** chunks and embeds documents, writes embeddings to Qdrant, and links canonical entities in Neo4j.
+- **Consistency** is maintained with background Celery tasks to keep graph and vector indexes aligned.
+
+### Voice Onboarding
+
+- **Deepgram** handles speech-to-text.
+- **ElevenLabs** handles text-to-speech.
+- A dedicated WebSocket stream supports low-latency bidirectional audio.
+
+### Deployment and Operations
+
+- **Docker Compose** orchestrates local services (API, workers, Redis, Neo4j, Qdrant).
+- **Observability** captures logs and optional traces to diagnose latency or LLM/tool errors.
+- **Configuration** is centralized via environment variables for easy switching between providers.
+
+### Service Screenshots
+
+**Keywords AI**
+
+![Keywords AI](images/Screenshot%202026-02-01%20at%204.42.46%E2%80%AFAM.png)
+
+
+
+![Supabase](images/Screenshot%202026-02-01%20at%204.42.56%E2%80%AFAM.png)
+
+
+
+![Docker](images/Screenshot%202026-02-01%20at%204.43.05%E2%80%AFAM.png)
+
+
+![Screenshot 4.43.23](images/Screenshot%202026-02-01%20at%204.43.23%E2%80%AFAM.png)
+
+![Screenshot 4.43.32](images/Screenshot%202026-02-01%20at%204.43.32%E2%80%AFAM.png)
+
+![Screenshot 4.43.39](images/Screenshot%202026-02-01%20at%204.43.39%E2%80%AFAM.png)
+
+**Supabase**
+
+![Screenshot 4.44.00](images/Screenshot%202026-02-01%20at%204.44.00%E2%80%AFAM.png)
+
+**Docker**
+
+![Screenshot 4.46.51](images/Screenshot%202026-02-01%20at%204.46.51%E2%80%AFAM.png)
+
+![Screenshot 4.48.08](images/Screenshot%202026-02-01%20at%204.48.08%E2%80%AFAM.png)
 
 ## Tech Stack
 
@@ -37,11 +99,11 @@ A multi-agent AI system for internal company knowledge management, team analytic
 |-----------|------------|
 | API Framework | FastAPI |
 | Agent Framework | LangGraph |
-| LLM | Anthropic Claude |
+| LLM | Keywords AI (OpenAI-compatible) / Anthropic (optional) |
 | Embeddings | Voyage AI / OpenAI |
 | Knowledge Graph | Neo4j |
 | Vector Database | Qdrant |
-| Primary Database | PostgreSQL |
+| Primary Database | Supabase Postgres |
 | Cache/Queue | Redis |
 | Task Queue | Celery |
 | Voice | Deepgram + ElevenLabs |
