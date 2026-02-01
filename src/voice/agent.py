@@ -1,14 +1,16 @@
-"""Voice Onboarding Agent with Textbook Knowledge Integration.
+"""Voice Onboarding Agent with Textbook Knowledge and Team Metrics Integration.
 
 This agent:
 - Handles voice-based queries from new employees
 - Retrieves relevant knowledge from the textbook hierarchy
+- Accesses team metrics (velocity, sprint data) from Neo4j
 - Provides spoken responses using ElevenLabs TTS
 - Integrates with Zoom for meeting-based onboarding
 """
 
 import asyncio
 import base64
+import re
 from datetime import datetime
 from typing import Any, AsyncGenerator
 from uuid import uuid4
@@ -20,17 +22,36 @@ from src.agents.knowledge.retrieval import hybrid_retriever
 from src.config import settings
 from src.knowledge.textbook.hierarchy import HierarchyManager
 from src.memory.manager import memory_manager
+from src.mcp.internal.connector import internal_analytics_connector
 from src.voice.elevenlabs_client import elevenlabs_client
 
 logger = structlog.get_logger()
 
+# Patterns that indicate team metrics queries
+TEAM_METRICS_PATTERNS = [
+    r'\b(team|sprint)\s*(velocity|metrics|performance|health)\b',
+    r'\b(velocity|burndown|sprint)\b.*\b(team|backend|frontend|platform|ml)\b',
+    r'\b(backend|frontend|platform|ml|engineering)\s*team\b.*\b(doing|performance|metrics|velocity|sprint|prs?|pull)',
+    r'\bhow\s*(is|are|many)\s*(the|our)?\s*(team|backend|frontend|platform|prs?|pull)',
+    r'\b(story\s*points?|completed|committed)\b',
+    r'\b(prs?|pull\s*requests?|code\s*review)\b.*\b(merged|time|stats|open|recent|raised|created|team|backend|frontend)\b',
+    r'\b(merged|open|recent|raised|created)\b.*\b(prs?|pull\s*requests?)\b',
+    r'\b(bugs?\s*fixed|deployment|incident)\b',
+    r'\blist\s*(all\s*)?(teams?|metrics)\b',
+    r'\b(what|how\s*many)\s+(prs?|pull\s*requests?)\b',
+    r'\b(show|get|find)\s+(me\s+)?(prs?|pull\s*requests?)\b',
+    r'\b(prs?|pull\s*requests?)\b.*\b(backend|frontend|platform|ml|engineering)\s*team\b',
+    r'\b(backend|frontend|platform|ml)\b.*\b(prs?|pull\s*requests?)\b',
+]
+
 
 class VoiceOnboardingAgent(BaseAgent):
-    """Voice-enabled onboarding agent with textbook knowledge integration.
-    
+    """Voice-enabled onboarding agent with textbook knowledge and team metrics integration.
+
     Capabilities:
     - Real-time voice conversation handling
     - Textbook hierarchy querying for company knowledge
+    - Team metrics access (velocity, sprint data, PRs, etc.)
     - Context-aware responses based on user's role and department
     - Streaming audio generation for low-latency responses
     - Zoom integration for meeting-based onboarding sessions
@@ -39,10 +60,95 @@ class VoiceOnboardingAgent(BaseAgent):
     def __init__(self):
         super().__init__(
             name="voice_onboarding",
-            description="Voice-enabled agent for onboarding with textbook knowledge access",
+            description="Voice-enabled agent for onboarding with textbook knowledge and team metrics access",
         )
         self.hierarchy_manager = HierarchyManager()
         self.active_sessions: dict[str, dict[str, Any]] = {}
+        self._analytics_connected = False
+
+    def _is_team_metrics_query(self, query: str) -> bool:
+        """Detect if the query is about team metrics."""
+        query_lower = query.lower()
+        for pattern in TEAM_METRICS_PATTERNS:
+            if re.search(pattern, query_lower):
+                return True
+        return False
+
+    def _extract_team_name(self, query: str) -> str | None:
+        """Extract team name from query."""
+        query_lower = query.lower()
+        teams = ['backend', 'frontend', 'platform', 'ml platform', 'engineering', 'ml']
+        for team in teams:
+            if team in query_lower:
+                return team.title()
+        return None
+
+    async def _ensure_analytics_connected(self) -> None:
+        """Ensure internal analytics connector is connected."""
+        if not self._analytics_connected:
+            try:
+                if not internal_analytics_connector.is_connected:
+                    await internal_analytics_connector.connect()
+                self._analytics_connected = True
+            except Exception as e:
+                logger.warning("Failed to connect analytics connector", error=str(e))
+
+    async def _query_team_metrics(
+        self,
+        query: str,
+        team_name: str | None = None,
+    ) -> dict[str, Any]:
+        """Query team metrics from Neo4j.
+
+        Returns velocity, sprint data, PRs, and other team metrics.
+        """
+        await self._ensure_analytics_connected()
+
+        results = {
+            "type": "team_metrics",
+            "data": {},
+        }
+
+        query_lower = query.lower()
+
+        try:
+            # Get velocity data
+            if any(word in query_lower for word in ['velocity', 'sprint', 'points', 'completed', 'committed']):
+                velocity = await internal_analytics_connector._get_team_velocity(
+                    team_name=team_name,
+                    num_sprints=5,
+                )
+                results["data"]["velocity"] = velocity
+
+            # Get detailed metrics
+            if any(word in query_lower for word in ['metrics', 'performance', 'health', 'doing', 'how']):
+                metrics = await internal_analytics_connector._get_team_metrics(
+                    team_name=team_name,
+                )
+                results["data"]["metrics"] = metrics
+
+            # Get PR data
+            if any(word in query_lower for word in ['pr', 'pull request', 'pull requests', 'code review', 'merged', 'prs']):
+                prs = await internal_analytics_connector._get_pull_requests()
+                results["data"]["pull_requests"] = prs
+
+            # List all teams
+            if 'list' in query_lower and 'team' in query_lower:
+                teams = await internal_analytics_connector._list_teams()
+                results["data"]["teams"] = teams
+
+            # If we didn't get specific data, get general team metrics
+            if not results["data"]:
+                metrics = await internal_analytics_connector._get_team_metrics(
+                    team_name=team_name,
+                )
+                results["data"]["metrics"] = metrics
+
+        except Exception as e:
+            logger.error("Failed to query team metrics", error=str(e))
+            results["error"] = str(e)
+
+        return results
 
     async def process(
         self,
@@ -168,12 +274,12 @@ class VoiceOnboardingAgent(BaseAgent):
         include_audio: bool = True,
     ) -> dict[str, Any]:
         """Process a voice query and return response with optional audio.
-        
+
         Args:
             session_id: Active session ID
             query: Transcribed user query
             include_audio: Whether to generate audio response
-            
+
         Returns:
             Response with text, audio (if requested), and metadata
         """
@@ -181,18 +287,30 @@ class VoiceOnboardingAgent(BaseAgent):
         if not session:
             raise ValueError(f"Session {session_id} not found")
 
-        # Retrieve relevant knowledge from textbook
+        # Check if this is a team metrics query
+        is_metrics_query = self._is_team_metrics_query(query)
+        team_metrics = None
+        knowledge_results = []
+
+        if is_metrics_query:
+            # Query team metrics
+            team_name = self._extract_team_name(query) or session.get("user_department")
+            team_metrics = await self._query_team_metrics(query, team_name)
+            logger.info("Team metrics query detected", team=team_name, has_data=bool(team_metrics.get("data")))
+
+        # Also retrieve knowledge from textbook (may have relevant context)
         knowledge_results = await self._query_textbook(
             query=query,
             department=session.get("user_department"),
             role=session.get("user_role"),
         )
-        
+
         # Build context-aware response
         response = await self._generate_response(
             query=query,
             session=session,
             knowledge_results=knowledge_results,
+            team_metrics=team_metrics,
         )
         
         # Update session state
@@ -229,7 +347,7 @@ class VoiceOnboardingAgent(BaseAgent):
         query: str,
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Stream voice response for real-time playback.
-        
+
         Yields:
             Chunks containing either text or audio data
         """
@@ -237,14 +355,22 @@ class VoiceOnboardingAgent(BaseAgent):
         if not session:
             raise ValueError(f"Session {session_id} not found")
 
+        # Check if this is a team metrics query
+        is_metrics_query = self._is_team_metrics_query(query)
+        team_metrics = None
+
+        if is_metrics_query:
+            team_name = self._extract_team_name(query) or session.get("user_department")
+            team_metrics = await self._query_team_metrics(query, team_name)
+
         # Get knowledge context
         knowledge_results = await self._query_textbook(
             query=query,
             department=session.get("user_department"),
         )
-        
+
         # Generate streaming response
-        async for chunk in self._stream_response(query, session, knowledge_results):
+        async for chunk in self._stream_response(query, session, knowledge_results, team_metrics):
             yield chunk
 
     async def _query_textbook(
@@ -353,19 +479,39 @@ class VoiceOnboardingAgent(BaseAgent):
         query: str,
         session: dict[str, Any],
         knowledge_results: list[dict[str, Any]],
+        team_metrics: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Generate a response using retrieved knowledge and LLM."""
+        """Generate a response using retrieved knowledge, team metrics, and LLM."""
 
         # Format knowledge context
         knowledge_context = self._format_knowledge_for_prompt(knowledge_results)
 
+        # Format team metrics if available
+        metrics_context = ""
+        if team_metrics and team_metrics.get("data"):
+            metrics_context = self._format_team_metrics_for_prompt(team_metrics["data"])
+
         # Determine if we have good knowledge to share
         has_knowledge = bool(knowledge_results and len(knowledge_results) > 0)
+        has_metrics = bool(metrics_context)
         sources_mention = ""
         if has_knowledge:
             source_names = [r.get("title", r.get("source", "company docs")) for r in knowledge_results[:2] if r.get("title") or r.get("source")]
             if source_names:
                 sources_mention = f"\nYou found this information from: {', '.join(source_names)}. Naturally mention your source when helpful."
+
+        # Build data sections
+        data_sections = ""
+        if metrics_context:
+            data_sections += f"""
+TEAM METRICS DATA (from company analytics):
+{metrics_context}
+"""
+        if knowledge_context and knowledge_context != "No specific information found in the company knowledge base for this topic.":
+            data_sections += f"""
+KNOWLEDGE FROM COMPANY TEXTBOOK:
+{knowledge_context}
+"""
 
         # Build system prompt for conversational explanation
         system = f"""You are a friendly and knowledgeable voice assistant helping employees learn about the company.
@@ -383,15 +529,19 @@ USER CONTEXT:
 - Role: {session.get('user_role', 'New Employee')}
 - Department: {session.get('user_department', 'General')}
 {sources_mention}
-
-KNOWLEDGE FROM COMPANY TEXTBOOK:
-{knowledge_context}
+{data_sections}
 
 HOW TO RESPOND:
 1. Start with a brief, direct answer to their question
 2. Then explain the key details in an engaging way
 3. Add relevant context that would be helpful to know
 4. End with an invitation for follow-up questions
+
+IMPORTANT FOR TEAM METRICS:
+- When you have team metrics data, share specific numbers naturally
+- Example: "The Backend team has been doing great! They completed 28 story points last sprint..."
+- Compare across sprints if data is available to show trends
+- Mention things like velocity, completion rate, PRs merged, etc.
 
 IMPORTANT:
 - Keep responses to 3-5 sentences for voice (people are listening, not reading)
@@ -422,10 +572,13 @@ IMPORTANT:
             if r.get("title")
         ]
 
+        # Confidence is high if we have knowledge or team metrics data
+        has_data = bool(knowledge_results) or bool(team_metrics and team_metrics.get("data"))
+
         return {
             "text": result["content"],
             "sources": sources,
-            "confidence": 0.9 if knowledge_results else 0.7,
+            "confidence": 0.9 if has_data else 0.7,
         }
 
     async def _stream_response(
@@ -433,11 +586,12 @@ IMPORTANT:
         query: str,
         session: dict[str, Any],
         knowledge_results: list[dict[str, Any]],
+        team_metrics: dict[str, Any] | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Stream response text and audio chunks."""
-        
+
         # Generate full response first (for now)
-        response = await self._generate_response(query, session, knowledge_results)
+        response = await self._generate_response(query, session, knowledge_results, team_metrics)
         
         # Yield text
         yield {"type": "text", "data": response["text"]}
@@ -454,6 +608,77 @@ IMPORTANT:
             "type": "complete",
             "sources": response.get("sources", []),
         }
+
+    def _format_team_metrics_for_prompt(
+        self,
+        data: dict[str, Any],
+        max_length: int = 1500,
+    ) -> str:
+        """Format team metrics data for inclusion in LLM prompt."""
+        parts = []
+
+        # Format velocity data
+        if "velocity" in data:
+            velocity_data = data["velocity"].get("data", [])
+            if velocity_data:
+                parts.append("SPRINT VELOCITY:")
+                for v in velocity_data[:5]:
+                    team = v.get("team", "Unknown")
+                    sprint = v.get("sprint", "")
+                    velocity = v.get("velocity", v.get("completed_points", 0))
+                    committed = v.get("committed_points", 0)
+                    completion_rate = round((velocity / committed * 100) if committed else 0)
+                    parts.append(f"  - {team} ({sprint}): {velocity} points completed / {committed} committed ({completion_rate}% completion)")
+
+        # Format detailed metrics
+        if "metrics" in data:
+            metrics_data = data["metrics"].get("data", [])
+            if metrics_data:
+                parts.append("\nDETAILED TEAM METRICS:")
+                for m in metrics_data[:5]:
+                    team = m.get("team", "Unknown")
+                    sprint = m.get("sprint", "")
+                    velocity = m.get("velocity", 0)
+                    bugs = m.get("bugs_fixed", 0)
+                    prs = m.get("prs_merged", 0)
+                    review_time = m.get("code_review_time_hours", 0)
+                    deployments = m.get("deployment_frequency", 0)
+                    incidents = m.get("incident_count", 0)
+                    parts.append(f"  - {team} ({sprint}):")
+                    parts.append(f"    Velocity: {velocity} points, Bugs fixed: {bugs}, PRs merged: {prs}")
+                    if review_time:
+                        parts.append(f"    Code review time: {review_time}h avg, Deployments: {deployments}/week, Incidents: {incidents}")
+
+        # Format PR data
+        if "pull_requests" in data:
+            pr_data = data["pull_requests"].get("data", [])
+            if pr_data:
+                parts.append("\nRECENT PULL REQUESTS:")
+                for pr in pr_data[:5]:
+                    number = pr.get("number", "")
+                    title = pr.get("title", "")[:50]
+                    state = pr.get("state", "")
+                    author = pr.get("author", "")
+                    parts.append(f"  - PR #{number}: {title} ({state}) by {author}")
+
+        # Format teams list
+        if "teams" in data:
+            teams_data = data["teams"].get("teams", [])
+            if teams_data:
+                parts.append("\nALL TEAMS:")
+                for t in teams_data:
+                    team_name = t.get("team", "Unknown")
+                    sprints = t.get("sprints", [])
+                    if sprints:
+                        recent = sprints[0] if sprints else {}
+                        velocity = recent.get("velocity", 0)
+                        parts.append(f"  - {team_name}: Recent velocity {velocity} points ({len(sprints)} sprints tracked)")
+
+        if not parts:
+            return "No team metrics data available."
+
+        result = "\n".join(parts)
+        return result[:max_length]
 
     def _format_knowledge_for_prompt(
         self,

@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Conversation } from '@11labs/client'
+import { Conversation } from '@elevenlabs/client'
 
 // ElevenLabs Agent ID from user's configuration
 const AGENT_ID = 'agent_4601kgc1063efqn8b3c4qea00sey'
