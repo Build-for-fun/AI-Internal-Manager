@@ -9,11 +9,13 @@ from src.config import settings
 from src.models.base import Base
 
 # Create async engine
+# Disable prepared statement cache for pgbouncer/Supabase pooler compatibility
 engine = create_async_engine(
     settings.database_url,
     pool_size=settings.database_pool_size,
     max_overflow=settings.database_max_overflow,
     echo=settings.debug,
+    connect_args={"statement_cache_size": 0},
 )
 
 # Create async session factory
