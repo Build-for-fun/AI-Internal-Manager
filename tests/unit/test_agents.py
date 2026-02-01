@@ -232,8 +232,8 @@ class TestEvaluatorAgent:
         )
 
         assert len(params.evaluators) == 2
-        assert params.evaluators[0].evaluator_slug == "tone-checker"
-        assert params.evaluators[1].evaluator_slug == "grammar-validator"
+        assert params.evaluators[0].evaluator_id == "tone-checker"
+        assert params.evaluators[1].evaluator_id == "grammar-validator"
         assert params.eval_inputs is None
 
     def test_build_eval_params_with_ideal_output(self, agent):
@@ -322,8 +322,8 @@ class TestEvaluatorSchemas:
 
     def test_evaluator_config(self):
         """Test EvaluatorConfig creation."""
-        config = EvaluatorConfig(evaluator_slug="test-evaluator")
-        assert config.evaluator_slug == "test-evaluator"
+        config = EvaluatorConfig(evaluator_id="test-evaluator")
+        assert config.evaluator_id == "test-evaluator"
 
     def test_eval_inputs(self):
         """Test EvalInputs creation."""
@@ -338,8 +338,8 @@ class TestEvaluatorSchemas:
         """Test EvalParams creation."""
         params = EvalParams(
             evaluators=[
-                EvaluatorConfig(evaluator_slug="eval1"),
-                EvaluatorConfig(evaluator_slug="eval2"),
+                EvaluatorConfig(evaluator_id="eval1"),
+                EvaluatorConfig(evaluator_id="eval2"),
             ],
             eval_inputs=EvalInputs(ideal_output="test")
         )

@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 class EvaluatorConfig(BaseModel):
     """Configuration for a single evaluator."""
 
-    evaluator_slug: str = Field(..., description="The slug of the evaluator to run")
+    evaluator_id: str = Field(..., description="The ID/slug of the evaluator to run")
 
 
 class EvalInputs(BaseModel):

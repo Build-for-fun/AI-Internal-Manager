@@ -368,7 +368,7 @@ Be concise and actionable in your responses."""
     ) -> EvalParams:
         """Build evaluation parameters."""
         evaluators = [
-            EvaluatorConfig(evaluator_slug=slug)
+            EvaluatorConfig(evaluator_id=slug)
             for slug in evaluator_slugs
         ]
 
@@ -424,7 +424,7 @@ Be concise and actionable in your responses."""
                 timeout=30.0,
             )
 
-            if response.status_code != 200:
+            if response.status_code not in (200, 201):
                 error_msg = f"Logging API error: {response.status_code} - {response.text}"
                 logger.error(error_msg)
                 return EvaluationResponse(
@@ -444,7 +444,7 @@ Be concise and actionable in your responses."""
                 status=EvaluationStatus.PENDING,
                 results=[
                     EvaluationResult(
-                        evaluator_slug=e.evaluator_slug,
+                        evaluator_slug=e.evaluator_id,
                         reasoning="Evaluation submitted - check Keywords AI dashboard for results",
                     )
                     for e in request.eval_params.evaluators
