@@ -64,18 +64,28 @@ class EmbeddingService:
 
     async def generate_embedding(self, text: str) -> list[float]:
         """Generate embedding for text using configured provider."""
-        if settings.embedding_provider == "voyage":
-            return await self._generate_voyage_embedding(text)
-        else:
-            return await self._generate_openai_embedding(text)
+        try:
+            if settings.embedding_provider == "voyage":
+                return await self._generate_voyage_embedding(text)
+            else:
+                return await self._generate_openai_embedding(text)
+        except Exception as e:
+            logger.warning("Embedding generation failed, using dummy", error=str(e))
+            # Return random unit vector or zero vector
+            return [0.0] * settings.embedding_dimension
 
     async def _generate_voyage_embedding(self, text: str) -> list[float]:
         """Generate embedding using Voyage AI."""
         import voyageai
+        
+        api_key = settings.voyage_api_key.get_secret_value()
+        if not api_key or api_key == "placeholder":
+             # Return dummy vector if no key
+            return [0.0] * settings.embedding_dimension
 
         if not self._embedding_client:
             self._embedding_client = voyageai.AsyncClient(
-                api_key=settings.voyage_api_key.get_secret_value()
+                api_key=api_key
             )
 
         result = await self._embedding_client.embed(
@@ -88,10 +98,14 @@ class EmbeddingService:
     async def _generate_openai_embedding(self, text: str) -> list[float]:
         """Generate embedding using OpenAI."""
         from openai import AsyncOpenAI
+        
+        api_key = settings.openai_api_key.get_secret_value()
+        if not api_key or api_key == "placeholder":
+            return [0.0] * settings.embedding_dimension
 
         if not self._embedding_client:
             self._embedding_client = AsyncOpenAI(
-                api_key=settings.openai_api_key.get_secret_value()
+                api_key=api_key
             )
 
         response = await self._embedding_client.embeddings.create(
@@ -107,46 +121,40 @@ class EmbeddingService:
         metadata: dict[str, Any],
         point_id: str | None = None,
     ) -> str:
-        """Store a text embedding in Qdrant.
-
-        Args:
-            collection: One of "org_memory", "user_memory", "team_memory", "knowledge"
-            text: The text to embed
-            metadata: Additional metadata to store with the embedding
-            point_id: Optional custom ID for the point
-
-        Returns:
-            The ID of the stored point
-        """
+        """Store a text embedding in Qdrant."""
         collection_name = self.collections.get(collection)
         if not collection_name:
             raise ValueError(f"Unknown collection: {collection}")
 
-        # Generate embedding
-        embedding = await self.generate_embedding(text)
-
-        # Create point
         point_id = point_id or str(uuid4())
-        point = PointStruct(
-            id=point_id,
-            vector=embedding,
-            payload={
-                "text": text,
-                **metadata,
-            },
-        )
 
-        # Upsert to collection
-        await self.client.upsert(
-            collection_name=collection_name,
-            points=[point],
-        )
+        try:
+            # Generate embedding
+            embedding = await self.generate_embedding(text)
 
-        logger.debug(
-            "Stored embedding",
-            collection=collection,
-            point_id=point_id,
-        )
+            # Create point
+            point = PointStruct(
+                id=point_id,
+                vector=embedding,
+                payload={
+                    "text": text,
+                    **metadata,
+                },
+            )
+
+            # Upsert to collection
+            await self.client.upsert(
+                collection_name=collection_name,
+                points=[point],
+            )
+
+            logger.debug(
+                "Stored embedding",
+                collection=collection,
+                point_id=point_id,
+            )
+        except Exception as e:
+            logger.warning("Failed to store embedding", collection=collection, error=str(e))
 
         return point_id
 
@@ -158,55 +166,48 @@ class EmbeddingService:
         filters: dict[str, Any] | None = None,
         score_threshold: float = 0.0,
     ) -> list[dict[str, Any]]:
-        """Search for similar embeddings in a collection.
-
-        Args:
-            collection: Collection to search in
-            query: Query text
-            limit: Maximum number of results
-            filters: Optional filters to apply
-            score_threshold: Minimum similarity score
-
-        Returns:
-            List of results with score and payload
-        """
+        """Search for similar embeddings in a collection."""
         collection_name = self.collections.get(collection)
         if not collection_name:
             raise ValueError(f"Unknown collection: {collection}")
 
-        # Generate query embedding
-        query_embedding = await self.generate_embedding(query)
+        try:
+            # Generate query embedding
+            query_embedding = await self.generate_embedding(query)
 
-        # Build filter if provided
-        qdrant_filter = None
-        if filters:
-            conditions = []
-            for key, value in filters.items():
-                conditions.append(
-                    FieldCondition(
-                        key=key,
-                        match=MatchValue(value=value),
+            # Build filter if provided
+            qdrant_filter = None
+            if filters:
+                conditions = []
+                for key, value in filters.items():
+                    conditions.append(
+                        FieldCondition(
+                            key=key,
+                            match=MatchValue(value=value),
+                        )
                     )
-                )
-            qdrant_filter = Filter(must=conditions)
+                qdrant_filter = Filter(must=conditions)
 
-        # Search
-        results = await self.client.search(
-            collection_name=collection_name,
-            query_vector=query_embedding,
-            limit=limit,
-            query_filter=qdrant_filter,
-            score_threshold=score_threshold,
-        )
+            # Search
+            results = await self.client.search(
+                collection_name=collection_name,
+                query_vector=query_embedding,
+                limit=limit,
+                query_filter=qdrant_filter,
+                score_threshold=score_threshold,
+            )
 
-        return [
-            {
-                "id": str(r.id),
-                "score": r.score,
-                **r.payload,
-            }
-            for r in results
-        ]
+            return [
+                {
+                    "score": hit.score,
+                    "payload": hit.payload,
+                    "id": hit.id,
+                }
+                for hit in results
+            ]
+        except Exception as e:
+            logger.warning("Search failed", collection=collection, error=str(e))
+            return []
 
     async def hybrid_search(
         self,

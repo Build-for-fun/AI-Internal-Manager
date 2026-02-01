@@ -57,29 +57,41 @@ class MemoryManager:
 
         # User memory
         if include_user:
-            user_context = await self.user.get_user_context(
-                user_id=user_id,
-                query=query,
-                limit=limit_per_source,
-            )
-            context["user"] = user_context
+            try:
+                user_context = await self.user.get_user_context(
+                    user_id=user_id,
+                    query=query,
+                    limit=limit_per_source,
+                )
+                context["user"] = user_context
+            except Exception as e:
+                logger.warning("Failed to retrieve user memory", error=str(e))
+                context["user"] = []
 
         # Team memory
         if include_team and team_id:
-            team_context = await self.team.get_team_context(
-                team_id=team_id,
-                query=query,
-                limit=limit_per_source,
-            )
-            context["team"] = team_context
+            try:
+                team_context = await self.team.get_team_context(
+                    team_id=team_id,
+                    query=query,
+                    limit=limit_per_source,
+                )
+                context["team"] = team_context
+            except Exception as e:
+                logger.warning("Failed to retrieve team memory", error=str(e))
+                context["team"] = []
 
         # Org memory
         if include_org:
-            org_context = await self.org.search(
-                query=query,
-                limit=limit_per_source,
-            )
-            context["org"] = org_context
+            try:
+                org_context = await self.org.search(
+                    query=query,
+                    limit=limit_per_source,
+                )
+                context["org"] = org_context
+            except Exception as e:
+                logger.warning("Failed to retrieve org memory", error=str(e))
+                context["org"] = []
 
         return context
 
@@ -171,12 +183,15 @@ class MemoryManager:
         # Store summarized interaction in user memory
         # Only store if the interaction seems significant
         if len(query) > 50 or topics:
-            await self.user.store_interaction(
-                user_id=user_id,
-                query=query,
-                response_summary=response[:500] if len(response) > 500 else response,
-                topics=topics,
-            )
+            try:
+                await self.user.store_interaction(
+                    user_id=user_id,
+                    query=query,
+                    response_summary=response[:500] if len(response) > 500 else response,
+                    topics=topics,
+                )
+            except Exception as e:
+                logger.warning("Failed to store user memory", error=str(e))
 
     async def update_user_context(
         self,

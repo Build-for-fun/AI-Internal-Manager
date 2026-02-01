@@ -41,26 +41,41 @@ async def lifespan(app: FastAPI):
     logger.info("Database initialized")
 
     # Initialize Neo4j connection
-    from src.knowledge.graph.client import neo4j_client
-    await neo4j_client.connect()
-    logger.info("Neo4j connected")
+    try:
+        from src.knowledge.graph.client import neo4j_client
+        await neo4j_client.connect()
+        logger.info("Neo4j connected")
+    except Exception as e:
+        logger.warning("Failed to connect to Neo4j", error=str(e))
 
     # Initialize Qdrant collections
-    from src.knowledge.indexing.embedder import embedder
-    await embedder.init_collections()
-    logger.info("Qdrant collections initialized")
+    try:
+        from src.knowledge.indexing.embedder import embedder
+        await embedder.init_collections()
+        logger.info("Qdrant collections initialized")
+    except Exception as e:
+        logger.warning("Failed to initialize Qdrant collections", error=str(e))
 
     # Initialize Redis
-    from src.memory.short_term import redis_client
-    await redis_client.connect()
-    logger.info("Redis connected")
+    try:
+        from src.memory.short_term import redis_client
+        await redis_client.connect()
+        logger.info("Redis connected")
+    except Exception as e:
+        logger.warning("Failed to connect to Redis", error=str(e))
 
     yield
 
     # Shutdown
     logger.info("Shutting down AI Internal Manager")
-    await neo4j_client.close()
-    await redis_client.close()
+    try:
+        await neo4j_client.close()
+    except Exception:
+        pass
+    try:
+        await redis_client.close()
+    except Exception:
+        pass
 
 
 app = FastAPI(

@@ -24,7 +24,7 @@ from src.models import (  # noqa: F401
 config = context.config
 
 # Set SQLAlchemy URL from settings
-config.set_main_option("sqlalchemy.url", settings.database_url.replace("+asyncpg", ""))
+config.set_main_option("sqlalchemy.url", settings.database_url)
 
 # Setup logging
 if config.config_file_name is not None:

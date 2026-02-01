@@ -33,7 +33,6 @@ class TeamAnalysisAgent(BaseAgent):
         super().__init__(
             name="team_analysis",
             description="Analyzes team health, performance, and collaboration patterns",
-            model=settings.anthropic_default_model,
         )
         # Get analytics tools
         self._tools = mcp_registry.get_tools_for_agent("team_analysis")

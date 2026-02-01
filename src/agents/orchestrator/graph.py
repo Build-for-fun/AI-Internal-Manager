@@ -156,23 +156,40 @@ async def team_analysis_agent_node(state: ConversationState) -> dict[str, Any]:
 async def direct_response_node(state: ConversationState) -> dict[str, Any]:
     """Node for simple, direct responses."""
     from anthropic import AsyncAnthropic
+    from openai import AsyncOpenAI
 
     from src.config import settings
 
-    client = AsyncAnthropic(api_key=settings.anthropic_api_key.get_secret_value())
-
     query = state["current_query"]
     user_name = state.get("user_name", "there")
+    system_prompt = f"You are a friendly AI assistant for internal company use. The user's name is {user_name}. Keep responses brief and friendly."
 
-    response = await client.messages.create(
-        model="claude-3-5-haiku-20241022",
-        max_tokens=500,
-        system=f"You are a friendly AI assistant for internal company use. The user's name is {user_name}. Keep responses brief and friendly.",
-        messages=[{"role": "user", "content": query}],
-    )
+    if settings.llm_provider == "keywords_ai":
+        client = AsyncOpenAI(
+            api_key=settings.keywords_ai_api_key.get_secret_value(),
+            base_url=settings.keywords_ai_base_url,
+        )
+        response = await client.chat.completions.create(
+            model=settings.keywords_ai_default_model,
+            max_tokens=500,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": query},
+            ],
+        )
+        response_text = response.choices[0].message.content
+    else:
+        client = AsyncAnthropic(api_key=settings.anthropic_api_key.get_secret_value())
+        response = await client.messages.create(
+            model="claude-3-5-haiku-20241022",
+            max_tokens=500,
+            system=system_prompt,
+            messages=[{"role": "user", "content": query}],
+        )
+        response_text = response.content[0].text
 
     return {
-        "response": response.content[0].text,
+        "response": response_text,
         "active_agent": "direct_response",
     }
 

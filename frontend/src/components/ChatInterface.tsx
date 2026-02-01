@@ -64,6 +64,7 @@ export default function ChatInterface({ voiceActive, setVoiceActive }: ChatInter
   const [input, setInput] = useState('')
   const [isTyping, setIsTyping] = useState(false)
   const [currentAgent, setCurrentAgent] = useState<string | null>(null)
+  const [conversationId, setConversationId] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -75,8 +76,31 @@ export default function ChatInterface({ voiceActive, setVoiceActive }: ChatInter
     scrollToBottom()
   }, [messages])
 
+  // Create conversation on mount
+  useEffect(() => {
+    const createConversation = async () => {
+      try {
+        const response = await fetch('/api/v1/chat/conversations', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            title: 'New Session',
+            conversation_type: 'chat',
+          }),
+        })
+        const data = await response.json()
+        setConversationId(data.id)
+      } catch (error) {
+        console.error('Failed to create conversation:', error)
+      }
+    }
+    createConversation()
+  }, [])
+
   const handleSend = async () => {
-    if (!input.trim()) return
+    if (!input.trim() || !conversationId) return
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -88,28 +112,47 @@ export default function ChatInterface({ voiceActive, setVoiceActive }: ChatInter
     setMessages((prev) => [...prev, userMessage])
     setInput('')
     setIsTyping(true)
+    setCurrentAgent('orchestrator')
 
-    // Simulate agent routing and response
-    setTimeout(() => {
-      setCurrentAgent('knowledge')
-    }, 500)
+    try {
+      const response = await fetch(`/api/v1/chat/conversations/${conversationId}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: userMessage.content,
+          stream: false,
+        }),
+      })
 
-    setTimeout(() => {
+      const data = await response.json()
+
       const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
+        id: data.message.id,
         role: 'assistant',
-        content: `Based on my analysis of the knowledge base, here's what I found regarding your query:\n\n**Summary:**\nThe Q4 OKRs for the engineering team focus on three main areas:\n\n1. **Platform Reliability** - Achieve 99.95% uptime across all services\n2. **Developer Velocity** - Reduce deployment time by 40%\n3. **Technical Debt** - Address 60% of critical tech debt items\n\nWould you like me to elaborate on any of these objectives or show the associated key results?`,
-        agent: 'knowledge',
-        timestamp: new Date(),
-        sources: [
-          { title: 'Q4 2024 Engineering OKRs', type: 'Document' },
-          { title: 'Platform Team Goals', type: 'Confluence' },
-        ],
+        content: data.message.content,
+        agent: data.agent_used,
+        timestamp: new Date(data.message.created_at),
+        sources: data.sources,
       }
+
       setMessages((prev) => [...prev, assistantMessage])
+      if (data.agent_used) setCurrentAgent(data.agent_used)
+      
+    } catch (error) {
+      console.error('Failed to send message:', error)
+      const errorMessage: Message = {
+        id: Date.now().toString(),
+        role: 'assistant',
+        content: 'Sorry, I encountered an error connecting to the server.',
+        timestamp: new Date(),
+      }
+      setMessages((prev) => [...prev, errorMessage])
+    } finally {
       setIsTyping(false)
-      setCurrentAgent(null)
-    }, 2500)
+      setTimeout(() => setCurrentAgent(null), 2000)
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

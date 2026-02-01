@@ -36,14 +36,14 @@ class RedisClient:
             logger.info("Redis connection closed")
 
     @property
-    def client(self) -> redis.Redis:
+    def client(self) -> redis.Redis | None:
         """Get the Redis client."""
-        if not self._client:
-            raise RuntimeError("Redis client not initialized. Call connect() first.")
         return self._client
 
     async def ping(self) -> bool:
         """Check Redis connectivity."""
+        if not self._client:
+            return False
         return await self.client.ping()
 
 
@@ -83,6 +83,9 @@ class ShortTermMemory:
         metadata: dict[str, Any] | None = None,
     ) -> None:
         """Store a message in conversation history."""
+        if not redis_client.client:
+            return
+
         message = {
             "role": role,
             "content": content,
@@ -90,23 +93,39 @@ class ShortTermMemory:
         }
 
         key = self._conversation_key(conversation_id)
-        await redis_client.client.rpush(key, json.dumps(message))
-        await redis_client.client.expire(key, self.ttl)
+        try:
+            await redis_client.client.rpush(key, json.dumps(message))
+            await redis_client.client.expire(key, self.ttl)
+        except Exception as e:
+            logger.warning("Redis store failed", error=str(e))
 
     async def get_messages(
         self,
         conversation_id: str,
         limit: int = 20,
     ) -> list[dict[str, Any]]:
-        """Get recent messages from conversation history."""
+        """Get recent messages."""
+        if not redis_client.client:
+            return []
+
         key = self._conversation_key(conversation_id)
-        messages = await redis_client.client.lrange(key, -limit, -1)
-        return [json.loads(m) for m in messages]
+        try:
+            raw_messages = await redis_client.client.lrange(key, -limit, -1)
+            return [json.loads(msg) for msg in raw_messages]
+        except Exception as e:
+            logger.warning("Redis fetch failed", error=str(e))
+            return []
 
     async def clear_messages(self, conversation_id: str) -> None:
         """Clear conversation history."""
+        if not redis_client.client:
+            return
+            
         key = self._conversation_key(conversation_id)
-        await redis_client.client.delete(key)
+        try:
+            await redis_client.client.delete(key)
+        except Exception as e:
+            logger.warning("Redis delete failed", error=str(e))
 
     async def set_context(
         self,
@@ -114,21 +133,34 @@ class ShortTermMemory:
         context: dict[str, Any],
     ) -> None:
         """Set conversation context."""
+        if not redis_client.client:
+            return
+            
         key = self._context_key(conversation_id)
-        await redis_client.client.set(
-            key,
-            json.dumps(context),
-            ex=self.ttl,
-        )
+        try:
+            await redis_client.client.set(
+                key,
+                json.dumps(context),
+                ex=self.ttl,
+            )
+        except Exception as e:
+            logger.warning("Redis set context failed", error=str(e))
 
     async def get_context(
         self,
         conversation_id: str,
     ) -> dict[str, Any] | None:
         """Get conversation context."""
+        if not redis_client.client:
+            return None
+            
         key = self._context_key(conversation_id)
-        data = await redis_client.client.get(key)
-        return json.loads(data) if data else None
+        try:
+            data = await redis_client.client.get(key)
+            return json.loads(data) if data else None
+        except Exception as e:
+            logger.warning("Redis get context failed", error=str(e))
+            return None
 
     async def update_context(
         self,
@@ -147,26 +179,45 @@ class ShortTermMemory:
         task: dict[str, Any],
     ) -> None:
         """Set active task for conversation."""
+        if not redis_client.client:
+            return
+            
         key = self._task_key(conversation_id)
-        await redis_client.client.set(
-            key,
-            json.dumps(task),
-            ex=self.ttl,
-        )
+        try:
+            await redis_client.client.set(
+                key,
+                json.dumps(task),
+                ex=self.ttl,
+            )
+        except Exception as e:
+            logger.warning("Redis set task failed", error=str(e))
 
     async def get_active_task(
         self,
         conversation_id: str,
     ) -> dict[str, Any] | None:
         """Get active task for conversation."""
+        if not redis_client.client:
+            return None
+            
         key = self._task_key(conversation_id)
-        data = await redis_client.client.get(key)
-        return json.loads(data) if data else None
+        try:
+            data = await redis_client.client.get(key)
+            return json.loads(data) if data else None
+        except Exception as e:
+            logger.warning("Redis get task failed", error=str(e))
+            return None
 
     async def clear_active_task(self, conversation_id: str) -> None:
         """Clear active task."""
+        if not redis_client.client:
+            return
+            
         key = self._task_key(conversation_id)
-        await redis_client.client.delete(key)
+        try:
+            await redis_client.client.delete(key)
+        except Exception as e:
+            logger.warning("Redis clear task failed", error=str(e))
 
     async def cleanup_expired(self) -> int:
         """Cleanup is handled by Redis TTL, this is a no-op."""

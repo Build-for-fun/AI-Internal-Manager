@@ -69,7 +69,7 @@ async def create_conversation(
         user_id=user.id,
         title=request.title,
         conversation_type=request.conversation_type.value,
-        metadata=request.metadata,
+        conversation_metadata=request.metadata,
     )
     db.add(conversation)
     await db.commit()

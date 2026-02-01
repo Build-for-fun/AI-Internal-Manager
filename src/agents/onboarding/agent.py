@@ -32,7 +32,6 @@ class OnboardingAgent(BaseAgent):
         super().__init__(
             name="onboarding",
             description="Guides new employees through their onboarding journey",
-            model=settings.anthropic_default_model,
         )
 
     async def process(

@@ -1,0 +1,369 @@
+{
+  "metadata": {
+    "created_at": "2026-01-31",
+    "version": "1.0",
+    "description": "Sample data for AI Internal Manager testing and development"
+  },
+  "users": [
+    {
+      "id": "user-alice",
+      "email": "alice.chen@company.com",
+      "full_name": "Alice Chen",
+      "role": "Senior Software Engineer",
+      "department": "Engineering",
+      "team": "Platform",
+      "expertise_areas": ["Backend", "Architecture", "Database Design"]
+    },
+    {
+      "id": "user-bob",
+      "email": "bob.smith@company.com",
+      "full_name": "Bob Smith",
+      "role": "Product Manager",
+      "department": "Product",
+      "team": "Infrastructure",
+      "expertise_areas": ["Product Strategy", "Roadmapping"]
+    },
+    {
+      "id": "user-carol",
+      "email": "carol.williams@company.com",
+      "full_name": "Carol Williams",
+      "role": "DevOps Engineer",
+      "department": "Engineering",
+      "team": "Infrastructure",
+      "expertise_areas": ["Kubernetes", "CI/CD", "Cloud Infrastructure"]
+    },
+    {
+      "id": "user-david",
+      "email": "david.lee@company.com",
+      "full_name": "David Lee",
+      "role": "Data Scientist",
+      "department": "Analytics",
+      "team": "ML Platform",
+      "expertise_areas": ["Machine Learning", "Data Engineering", "Python"]
+    },
+    {
+      "id": "user-emma",
+      "email": "emma.wilson@company.com",
+      "full_name": "Emma Wilson",
+      "role": "Engineering Manager",
+      "department": "Engineering",
+      "team": "Platform",
+      "expertise_areas": ["Team Leadership", "Mentoring", "Architecture"]
+    }
+  ],
+  "organization_structure": {
+    "departments": [
+      {
+        "id": "dept-engineering",
+        "title": "Engineering",
+        "description": "Core product engineering team",
+        "head": "emma.wilson@company.com"
+      },
+      {
+        "id": "dept-product",
+        "title": "Product",
+        "description": "Product management and strategy",
+        "head": null
+      },
+      {
+        "id": "dept-analytics",
+        "title": "Analytics",
+        "description": "Data and analytics platform",
+        "head": null
+      }
+    ],
+    "subdepartments": [
+      {
+        "id": "sub-platform",
+        "title": "Platform Team",
+        "department": "Engineering",
+        "lead": "alice.chen@company.com"
+      },
+      {
+        "id": "sub-infra",
+        "title": "Infrastructure Team",
+        "department": "Engineering",
+        "lead": "carol.williams@company.com"
+      },
+      {
+        "id": "sub-ml",
+        "title": "ML Platform",
+        "department": "Analytics",
+        "lead": "david.lee@company.com"
+      }
+    ]
+  },
+  "knowledge_topics": [
+    {
+      "id": "topic-auth",
+      "title": "Authentication & Authorization",
+      "category": "Platform Team",
+      "importance": 0.95,
+      "description": "OAuth, JWT, RBAC implementation"
+    },
+    {
+      "id": "topic-api",
+      "title": "API Design",
+      "category": "Platform Team",
+      "importance": 0.9,
+      "description": "REST API best practices and patterns"
+    },
+    {
+      "id": "topic-deployment",
+      "title": "Deployment & CI/CD",
+      "category": "Infrastructure Team",
+      "importance": 0.95,
+      "description": "GitHub Actions, Kubernetes, deployment strategies"
+    },
+    {
+      "id": "topic-monitoring",
+      "title": "Monitoring & Observability",
+      "category": "Infrastructure Team",
+      "importance": 0.85,
+      "description": "Prometheus, Grafana, log aggregation"
+    },
+    {
+      "id": "topic-ml-pipelines",
+      "title": "ML Pipelines",
+      "category": "ML Platform",
+      "importance": 0.9,
+      "description": "Data engineering for ML training and inference"
+    }
+  ],
+  "documentation": [
+    {
+      "id": "doc-oauth",
+      "title": "OAuth 2.0 Implementation Flow",
+      "topic": "Authentication & Authorization",
+      "type": "technical_guide",
+      "length": "medium",
+      "tags": ["authentication", "oauth", "security"],
+      "key_points": [
+        "Authorization Code flow for web apps",
+        "Access tokens (1 hour) vs Refresh tokens (30 days)",
+        "State parameter for CSRF prevention",
+        "HTTPS requirement"
+      ]
+    },
+    {
+      "id": "doc-jwt",
+      "title": "JWT Token Management",
+      "topic": "Authentication & Authorization",
+      "type": "technical_guide",
+      "length": "medium",
+      "tags": ["jwt", "tokens", "security"],
+      "key_points": [
+        "JWT structure: header.payload.signature",
+        "Token rotation strategy",
+        "RS256 for asymmetric signing",
+        "Token blacklisting for logout"
+      ]
+    },
+    {
+      "id": "doc-api-versioning",
+      "title": "API Versioning Strategy",
+      "topic": "API Design",
+      "type": "policy",
+      "length": "short",
+      "tags": ["api", "versioning", "backwards-compatibility"],
+      "key_points": [
+        "URL-based versioning (/v1, /v2, /v3)",
+        "Maintain 2+ versions simultaneously",
+        "12-month deprecation notice",
+        "Sunset headers and deprecation warnings"
+      ]
+    },
+    {
+      "id": "doc-deployment",
+      "title": "Deployment Strategy & Rollout",
+      "topic": "Deployment & CI/CD",
+      "type": "procedure",
+      "length": "medium",
+      "tags": ["deployment", "ci-cd", "kubernetes"],
+      "key_points": [
+        "Canary deployment (5% → 25% → 100%)",
+        "Automatic rollback on error spike > 0.5%",
+        "Pre-deployment checklist",
+        "ArgoCD for GitOps"
+      ]
+    },
+    {
+      "id": "doc-ml-pipeline",
+      "title": "Data Pipeline for ML Training",
+      "topic": "ML Pipelines",
+      "type": "technical_guide",
+      "length": "long",
+      "tags": ["ml", "data-engineering", "airflow"],
+      "key_points": [
+        "Airflow orchestration",
+        "DVC for data versioning",
+        "Distributed GPU training",
+        "Model serving with Seldon"
+      ]
+    }
+  ],
+  "organizational_decisions": [
+    {
+      "id": "decision-monorepo",
+      "title": "Adopt Monorepo Structure",
+      "date": "2024-01-15",
+      "status": "active",
+      "type": "technical",
+      "decision": "Migrated from multi-repo to monorepo using Turborepo",
+      "rationale": "Improved code reuse, atomic commits, simplified dependency management",
+      "alternatives_considered": [
+        "Maintain multi-repo structure",
+        "Use npm workspaces instead of Turborepo"
+      ]
+    },
+    {
+      "id": "decision-nextjs",
+      "title": "Standardize on Next.js for Frontend",
+      "date": "2024-02-01",
+      "status": "active",
+      "type": "technical",
+      "decision": "All new frontend projects use Next.js with TypeScript",
+      "rationale": "Unified stack, better performance, built-in SSR/SSG capabilities",
+      "alternatives_considered": [
+        "Continue with Create React App",
+        "Use Remix"
+      ]
+    },
+    {
+      "id": "decision-postgres",
+      "title": "PostgreSQL as Primary Database",
+      "date": "2023-06-01",
+      "status": "active",
+      "type": "technical",
+      "decision": "PostgreSQL is our main OLTP database",
+      "rationale": "ACID compliance, rich features (JSON, arrays, extensions), strong ecosystem",
+      "alternatives_considered": [
+        "MySQL",
+        "MongoDB"
+      ]
+    }
+  ],
+  "sample_conversation": {
+    "id": "conv-sample-001",
+    "title": "OAuth Implementation Discussion",
+    "user": "alice.chen@company.com",
+    "created_at": "2026-01-31T17:00:00Z",
+    "messages": [
+      {
+        "role": "assistant",
+        "agent": "orchestrator",
+        "content": "Welcome to NEXUS Mission Control. I'm your AI assistant with access to your company's knowledge base, team analytics, and onboarding systems. How can I help you today?"
+      },
+      {
+        "role": "user",
+        "content": "What's the OAuth flow we're using?"
+      },
+      {
+        "role": "assistant",
+        "agent": "knowledge",
+        "content": "We're implementing OAuth 2.0 using the Authorization Code flow. Here's the process:\n\n1. User initiates login\n2. They're redirected to our authorization server\n3. After granting permission, they get an authorization code\n4. The application exchanges the code for an access token\n5. The token is used to fetch user information\n\nThis approach is secure because the user's credentials are never shared with the application directly. We also implement refresh tokens with a 30-day expiration for long-lived sessions.",
+        "sources": [
+          {
+            "title": "OAuth 2.0 Implementation Flow",
+            "type": "documentation"
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": "How do we handle token expiration?"
+      },
+      {
+        "role": "assistant",
+        "agent": "knowledge",
+        "content": "For token management, we follow these practices:\n\n**Access tokens**: 1-hour expiration (short-lived)\n**Refresh tokens**: 30-day expiration (long-lived)\n**Token rotation**: We issue a new refresh token with each use\n\nWhen an access token expires, the client uses the refresh token to get a new access token without requiring the user to log in again. This balances security with user convenience.",
+        "sources": [
+          {
+            "title": "JWT Token Management",
+            "type": "documentation"
+          }
+        ]
+      }
+    ]
+  },
+  "policies": [
+    {
+      "id": "policy-code-review",
+      "title": "Code Review Standards",
+      "type": "code_review",
+      "status": "active",
+      "content": "All code changes require at least one approval from another engineer. Critical infrastructure changes require two approvals. Reviews should focus on correctness, performance, security, and maintainability."
+    },
+    {
+      "id": "policy-oncall",
+      "title": "On-Call Rotation Policy",
+      "type": "incident_response",
+      "status": "active",
+      "content": "Engineers rotate on-call duty weekly. On-call engineers respond to incidents within 15 minutes. Each engineer gets 2 weeks off every 8 weeks."
+    },
+    {
+      "id": "policy-testing",
+      "title": "Testing Requirements",
+      "type": "testing",
+      "status": "active",
+      "content": "All code changes must maintain or improve test coverage. Minimum coverage for new code: 80%. Unit tests for business logic, integration tests for APIs, e2e tests for critical flows."
+    }
+  ],
+  "best_practices": [
+    {
+      "id": "bp-query-optimization",
+      "title": "Database Query Optimization",
+      "category": "Database",
+      "source_team": "Platform",
+      "tips": [
+        "Use EXPLAIN ANALYZE to understand query performance",
+        "Index heavily-filtered columns",
+        "Avoid SELECT *, fetch only needed columns",
+        "Use connection pooling with reasonable limits (20-50 connections)"
+      ]
+    },
+    {
+      "id": "bp-error-handling",
+      "title": "Error Handling Best Practices",
+      "category": "Error Handling",
+      "source_team": "Platform",
+      "tips": [
+        "Always catch specific exceptions, not generic Exception",
+        "Log errors with context: user_id, request_id, stack trace",
+        "Return meaningful error messages without exposing internals",
+        "Implement exponential backoff for retries"
+      ]
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How do I reset my authentication token?",
+      "answer": "Use the /api/auth/refresh endpoint with your valid refresh token to get a new access token. If both tokens are expired, log in again."
+    },
+    {
+      "question": "What's the deployment process?",
+      "answer": "We use canary deployments: 5% traffic → 25% → 100%. The system auto-rolls back if error rate exceeds 0.5%. See the deployment guide for details."
+    },
+    {
+      "question": "How do I access the knowledge base?",
+      "answer": "The knowledge base is accessible via semantic search in NEXUS. Ask questions about any topic and the system will retrieve relevant documentation."
+    }
+  ],
+  "statistics": {
+    "total_users": 5,
+    "total_conversations": 3,
+    "total_messages": 8,
+    "total_topics": 5,
+    "total_documents": 5,
+    "total_decisions": 3,
+    "total_policies": 3,
+    "total_best_practices": 2,
+    "documentation_coverage": {
+      "authentication": 100,
+      "api_design": 50,
+      "deployment": 80,
+      "monitoring": 0,
+      "ml_pipelines": 40
+    }
+  }
+}

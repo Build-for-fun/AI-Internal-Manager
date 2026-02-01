@@ -5,6 +5,7 @@ from typing import Any
 
 import structlog
 from anthropic import AsyncAnthropic
+from openai import AsyncOpenAI
 
 from src.config import settings
 from src.mcp.base import MCPTool
@@ -30,16 +31,27 @@ class BaseAgent(ABC):
     ):
         self.name = name
         self.description = description
-        self.model = model or settings.anthropic_default_model
-        self.client = AsyncAnthropic(api_key=settings.anthropic_api_key.get_secret_value())
+        self.llm_provider = settings.llm_provider
         self._tools: list[MCPTool] = []
+
+        if self.llm_provider == "keywords_ai":
+            self.model = model or settings.keywords_ai_default_model
+            self.client = AsyncOpenAI(
+                api_key=settings.keywords_ai_api_key.get_secret_value(),
+                base_url=settings.keywords_ai_base_url,
+            )
+        else:
+            self.model = model or settings.anthropic_default_model
+            self.client = AsyncAnthropic(api_key=settings.anthropic_api_key.get_secret_value())
 
     def set_tools(self, tools: list[MCPTool]) -> None:
         """Set the tools available to this agent."""
         self._tools = tools
 
     def get_tools_for_llm(self) -> list[dict[str, Any]]:
-        """Get tools in Anthropic format."""
+        """Get tools in provider-specific format."""
+        if self.llm_provider == "keywords_ai":
+            return [tool.to_openai_function() for tool in self._tools]
         return [tool.to_anthropic_tool() for tool in self._tools]
 
     @abstractmethod
@@ -73,6 +85,9 @@ class BaseAgent(ABC):
 
         Returns the full response including tool calls if any.
         """
+        if self.llm_provider == "keywords_ai":
+            return await self._call_openai(messages, system, tools, max_tokens)
+
         kwargs: dict[str, Any] = {
             "model": self.model,
             "max_tokens": max_tokens or settings.anthropic_max_tokens,
@@ -94,6 +109,58 @@ class BaseAgent(ABC):
             "usage": {
                 "input_tokens": response.usage.input_tokens,
                 "output_tokens": response.usage.output_tokens,
+            },
+        }
+
+    async def _call_openai(
+        self,
+        messages: list[dict[str, Any]],
+        system: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int | None = None,
+    ) -> dict[str, Any]:
+        """Call the OpenAI-compatible LLM."""
+        openai_messages = messages.copy()
+        if system:
+            # Check if system message already exists at the start
+            if not (openai_messages and openai_messages[0]["role"] == "system"):
+                openai_messages.insert(0, {"role": "system", "content": system})
+
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "max_tokens": max_tokens,  # OpenAI might default differently, but passing None is usually fine if model has default
+            "messages": openai_messages,
+        }
+
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+
+        response = await self.client.chat.completions.create(**kwargs)
+        message = response.choices[0].message
+
+        # Safe JSON load
+        import json
+        tool_calls = []
+        if message.tool_calls:
+            for tc in message.tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments)
+                except json.JSONDecodeError:
+                    args = {}
+                tool_calls.append({
+                    "id": tc.id,
+                    "name": tc.function.name,
+                    "input": args,
+                })
+
+        return {
+            "content": message.content or "",
+            "tool_calls": tool_calls,
+            "stop_reason": response.choices[0].finish_reason,
+            "usage": {
+                "input_tokens": response.usage.prompt_tokens if response.usage else 0,
+                "output_tokens": response.usage.completion_tokens if response.usage else 0,
             },
         }
 
@@ -189,19 +256,52 @@ class BaseAgent(ABC):
                     })
 
             # Add assistant message with tool use
-            current_messages.append({
-                "role": "assistant",
-                "content": [
-                    {"type": "tool_use", "id": tc["id"], "name": tc["name"], "input": tc["input"]}
-                    for tc in tool_calls
-                ],
-            })
+            if self.llm_provider == "keywords_ai":
+                import json
+                
+                # OpenAI format
+                assistant_msg = {
+                    "role": "assistant",
+                    "content": response.get("content"),
+                }
+                
+                if tool_calls:
+                    assistant_msg["tool_calls"] = []
+                    for tc in tool_calls:
+                        assistant_msg["tool_calls"].append({
+                            "id": tc["id"],
+                            "type": "function",
+                            "function": {
+                                "name": tc["name"],
+                                "arguments": json.dumps(tc["input"]),
+                            }
+                        })
+                
+                current_messages.append(assistant_msg)
 
-            # Add tool results
-            current_messages.append({
-                "role": "user",
-                "content": tool_results,
-            })
+                # Add tool results
+                for tr in tool_results:
+                    current_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tr["tool_use_id"],
+                        "content": tr["content"],
+                    })
+
+            else:
+                # Anthropic format
+                current_messages.append({
+                    "role": "assistant",
+                    "content": [
+                        {"type": "tool_use", "id": tc["id"], "name": tc["name"], "input": tc["input"]}
+                        for tc in tool_calls
+                    ],
+                })
+
+                # Add tool results
+                current_messages.append({
+                    "role": "user",
+                    "content": tool_results,
+                })
 
         # Max iterations reached
         logger.warning("Max tool iterations reached", agent=self.name)

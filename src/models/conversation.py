@@ -51,7 +51,7 @@ class Conversation(Base, UUIDMixin, TimestampMixin):
     )
 
     # Metadata for the conversation
-    metadata: Mapped[dict[str, Any]] = mapped_column(
+    conversation_metadata: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         default=dict,
         nullable=False,
@@ -120,7 +120,7 @@ class Message(Base, UUIDMixin, TimestampMixin):
     output_tokens: Mapped[int | None] = mapped_column(nullable=True)
 
     # Message metadata
-    metadata: Mapped[dict[str, Any]] = mapped_column(
+    message_metadata: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         default=dict,
         nullable=False,

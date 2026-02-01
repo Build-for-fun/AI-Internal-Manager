@@ -45,7 +45,7 @@ class ConversationResponse(BaseModel):
     id: str
     title: str | None
     conversation_type: str
-    metadata: dict[str, Any]
+    metadata: dict[str, Any] = Field(validation_alias="conversation_metadata")
     last_agent: str | None
     created_at: datetime
     updated_at: datetime

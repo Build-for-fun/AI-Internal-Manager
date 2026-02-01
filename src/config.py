@@ -51,6 +51,14 @@ class Settings(BaseSettings):
     anthropic_reasoning_model: str = "claude-3-opus-20240229"
     anthropic_max_tokens: int = 4096
 
+    # Keywords AI
+    keywords_ai_api_key: SecretStr = Field(default=SecretStr(""))
+    keywords_ai_base_url: str = "https://api.keywordsai.co/api/"
+    keywords_ai_default_model: str = "gpt-4o"
+
+    # LLM Provider
+    llm_provider: Literal["anthropic", "keywords_ai"] = "anthropic"
+
     # Embeddings
     embedding_provider: Literal["voyage", "openai"] = "voyage"
     voyage_api_key: SecretStr = Field(default=SecretStr(""))

@@ -26,7 +26,6 @@ class KnowledgeAgent(BaseAgent):
         super().__init__(
             name="knowledge",
             description="Retrieves and synthesizes knowledge from company sources",
-            model=settings.anthropic_default_model,
         )
         # Get relevant tools
         self._tools = mcp_registry.get_tools_for_agent("knowledge")
@@ -62,9 +61,10 @@ class KnowledgeAgent(BaseAgent):
 Your role is to answer questions about company processes, documentation, projects, and decisions.
 
 IMPORTANT GUIDELINES:
-1. Base your answers on the provided context. If the context doesn't contain relevant information, say so.
-2. When referencing information, be specific about the source.
-3. If you're uncertain, express that uncertainty.
+1. Base your answers on the provided context when possible.
+2. If the context doesn't contain relevant information, you may use your general knowledge to assist, but MUST explicitly state that this information comes from general knowledge and not the company's internal knowledge base.
+3. When referencing information, be specific about the source.
+4. If you're uncertain, express that uncertainty.
 4. Be concise but thorough.
 5. Use formatting (bullet points, headers) when helpful.
 
