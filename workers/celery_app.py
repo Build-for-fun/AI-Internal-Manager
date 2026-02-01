@@ -1,6 +1,7 @@
 """Celery application configuration."""
 
 from celery import Celery
+from celery.schedules import crontab
 
 from src.config import settings
 
@@ -51,34 +52,17 @@ app.conf.beat_schedule = {
     # Weekly consolidation - Sundays at 2 AM
     "consolidate-weekly": {
         "task": "workers.tasks.consolidation.generate_weekly_summaries",
-        "schedule": {
-            "crontab": {
-                "minute": 0,
-                "hour": 2,
-                "day_of_week": 0,  # Sunday
-            },
-        },
+        "schedule": crontab(minute=0, hour=2, day_of_week=0),
     },
     # Monthly consolidation - 1st of month at 3 AM
     "consolidate-monthly": {
         "task": "workers.tasks.consolidation.generate_monthly_summaries",
-        "schedule": {
-            "crontab": {
-                "minute": 0,
-                "hour": 3,
-                "day_of_month": 1,
-            },
-        },
+        "schedule": crontab(minute=0, hour=3, day_of_month=1),
     },
     # Entity importance update - daily at 4 AM
     "update-entity-importance": {
         "task": "workers.tasks.consolidation.update_entity_importance",
-        "schedule": {
-            "crontab": {
-                "minute": 0,
-                "hour": 4,
-            },
-        },
+        "schedule": crontab(minute=0, hour=4),
     },
 }
 
