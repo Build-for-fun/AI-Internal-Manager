@@ -26,6 +26,7 @@ import {
 import { useElevenLabsVoice } from '../hooks/useElevenLabsVoice'
 import VoiceIndicator from './VoiceIndicator'
 import VoiceOverlay from './VoiceOverlay'
+import { apiUrl } from '../config/api'
 
 interface Message {
   id: string
@@ -166,7 +167,7 @@ export default function ChatInterface({ voiceActive, setVoiceActive }: ChatInter
   useEffect(() => {
     const createConversation = async () => {
       try {
-        const response = await fetch('/api/v1/chat/conversations', {
+        const response = await fetch(apiUrl('/api/v1/chat/conversations'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

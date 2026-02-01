@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { apiUrl } from '../config/api'
 
 interface RbacUser {
   id: string
@@ -57,7 +58,7 @@ export function RbacProvider({ children }: { children: React.ReactNode }) {
 
     const loadBootstrap = async () => {
       try {
-        const response = await fetch('/api/v1/rbac/bootstrap', {
+        const response = await fetch(apiUrl('/api/v1/rbac/bootstrap'), {
           headers: roleOverride ? { 'X-Demo-Role': roleOverride } : undefined,
         })
         if (!response.ok) {
