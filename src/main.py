@@ -6,7 +6,7 @@ import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.api.v1 import analytics, chat, evaluator, knowledge, onboarding, voice, rbac
+from src.api.v1 import analytics, chat, evaluator, knowledge, onboarding, voice, voice_agent, rbac
 from src.config import settings
 
 # Configure structured logging
@@ -109,6 +109,7 @@ app.add_middleware(
 # Include routers
 app.include_router(chat.router, prefix=f"{settings.api_prefix}/chat", tags=["Chat"])
 app.include_router(voice.router, prefix=f"{settings.api_prefix}/voice", tags=["Voice"])
+app.include_router(voice_agent.router, prefix=f"{settings.api_prefix}/voice", tags=["Voice Agent"])
 app.include_router(knowledge.router, prefix=f"{settings.api_prefix}/knowledge", tags=["Knowledge"])
 app.include_router(onboarding.router, prefix=f"{settings.api_prefix}/onboarding", tags=["Onboarding"])
 app.include_router(analytics.router, prefix=f"{settings.api_prefix}/analytics", tags=["Analytics"])

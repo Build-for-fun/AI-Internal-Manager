@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Send,
@@ -18,7 +18,14 @@ import {
   BookOpen,
   Users,
   GraduationCap,
+  Phone,
+  PhoneOff,
+  Volume2,
+  Loader2,
 } from 'lucide-react'
+import { useElevenLabsVoice } from '../hooks/useElevenLabsVoice'
+import VoiceIndicator from './VoiceIndicator'
+import VoiceOverlay from './VoiceOverlay'
 
 interface Message {
   id: string
@@ -65,8 +72,87 @@ export default function ChatInterface({ voiceActive, setVoiceActive }: ChatInter
   const [isTyping, setIsTyping] = useState(false)
   const [currentAgent, setCurrentAgent] = useState<string | null>(null)
   const [conversationId, setConversationId] = useState<string | null>(null)
+  const [lastTranscript, setLastTranscript] = useState<string>('')
+  const [lastResponse, setLastResponse] = useState<string>('')
+  const [lastSources, setLastSources] = useState<{ title: string; source?: string }[]>([])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  // Voice hook integration
+  const handleVoiceTranscription = useCallback((text: string) => {
+    setLastTranscript(text)
+    // Add user message from voice
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: 'user',
+      content: text,
+      timestamp: new Date(),
+    }
+    setMessages((prev) => [...prev, userMessage])
+    setIsTyping(true)
+    setCurrentAgent('orchestrator')
+  }, [])
+
+  const handleVoiceResponse = useCallback((text: string, sources?: { title: string; source?: string }[]) => {
+    setLastResponse(text)
+    if (sources) {
+      setLastSources(sources)
+    }
+    // Add assistant message from voice
+    const assistantMessage: Message = {
+      id: Date.now().toString(),
+      role: 'assistant',
+      content: text,
+      agent: 'knowledge',  // Voice uses knowledge agent
+      timestamp: new Date(),
+      sources: sources?.map(s => ({ title: s.title, type: s.source || 'textbook' })),
+    }
+    setMessages((prev) => [...prev, assistantMessage])
+    setIsTyping(false)
+    setCurrentAgent(null)
+  }, [])
+
+  const handleVoiceError = useCallback((error: string) => {
+    console.error('Voice error:', error)
+    const errorMessage: Message = {
+      id: Date.now().toString(),
+      role: 'assistant',
+      content: `Voice error: ${error}. Please try again or use text input.`,
+      timestamp: new Date(),
+    }
+    setMessages((prev) => [...prev, errorMessage])
+    setIsTyping(false)
+  }, [])
+
+  const voice = useElevenLabsVoice({
+    onTranscription: handleVoiceTranscription,
+    onResponse: handleVoiceResponse,
+    onError: handleVoiceError,
+  })
+
+  // Handle voice mode toggle - ElevenLabs starts listening automatically
+  const handleVoiceToggle = useCallback(async () => {
+    if (voiceActive) {
+      // Turning off voice mode
+      voice.disconnect()
+      setVoiceActive(false)
+      setLastTranscript('')
+      setLastResponse('')
+    } else {
+      // Turning on voice mode - connect to ElevenLabs agent
+      try {
+        await voice.connect()
+        setVoiceActive(true)
+      } catch (error) {
+        console.error('Failed to enable voice mode:', error)
+      }
+    }
+  }, [voiceActive, voice, setVoiceActive])
+
+  // Handle microphone button - just toggle voice mode
+  const handleMicClick = useCallback(async () => {
+    await handleVoiceToggle()
+  }, [handleVoiceToggle])
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -164,6 +250,22 @@ export default function ChatInterface({ voiceActive, setVoiceActive }: ChatInter
 
   return (
     <div style={styles.container}>
+      {/* Big Voice Overlay - shows when voice is active */}
+      <VoiceOverlay
+        isConnected={voice.isConnected}
+        isConnecting={voice.isConnecting}
+        isListening={voice.isListening}
+        isSpeaking={voice.isSpeaking}
+        messages={voice.messages}
+        onDisconnect={() => {
+          voice.disconnect()
+          setVoiceActive(false)
+          setLastTranscript('')
+          setLastResponse('')
+          setLastSources([])
+        }}
+      />
+
       {/* Chat header */}
       <div style={styles.header}>
         <div style={styles.headerLeft}>
@@ -256,6 +358,21 @@ export default function ChatInterface({ voiceActive, setVoiceActive }: ChatInter
 
       {/* Input area */}
       <div style={styles.inputContainer}>
+        {/* Voice indicator - shows when voice is active */}
+        <VoiceIndicator
+          isConnected={voice.isConnected}
+          isRecording={voice.isRecording}
+          isProcessing={voice.isProcessing}
+          isSpeaking={voice.isSpeaking}
+          audioLevel={voice.audioLevel}
+          onStopRecording={voice.stopRecording}
+          onStopSpeaking={voice.stopSpeaking}
+          onDisconnect={() => {
+            voice.disconnect()
+            setVoiceActive(false)
+          }}
+        />
+
         <div style={styles.inputWrapper}>
           <motion.button
             style={styles.inputIconBtn}
@@ -270,22 +387,23 @@ export default function ChatInterface({ voiceActive, setVoiceActive }: ChatInter
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask anything about your organization..."
+            placeholder={voiceActive ? "Tap the mic to speak or type here..." : "Ask anything about your organization..."}
             style={styles.textarea}
             rows={1}
           />
 
+          {/* Big Voice button - opens voice overlay */}
           <motion.button
-            style={{
-              ...styles.inputIconBtn,
-              ...(voiceActive ? styles.voiceActive : {}),
-            }}
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            onClick={() => setVoiceActive(!voiceActive)}
+            style={styles.bigVoiceBtn}
+            whileHover={{ scale: 1.05, boxShadow: '0 0 30px rgba(0, 245, 212, 0.4)' }}
+            whileTap={{ scale: 0.95 }}
+            onClick={handleMicClick}
+            disabled={voice.isProcessing}
+            title="Start voice conversation"
+            aria-label="Start voice conversation"
           >
-            {voiceActive ? <Mic size={18} /> : <MicOff size={18} />}
-            {voiceActive && <div style={styles.voicePulseSmall} />}
+            <Mic size={24} />
+            <span>Voice</span>
           </motion.button>
 
           <motion.button
@@ -304,11 +422,28 @@ export default function ChatInterface({ voiceActive, setVoiceActive }: ChatInter
 
         <div style={styles.inputFooter}>
           <span style={styles.inputHint}>
-            Press <kbd style={styles.kbd}>Enter</kbd> to send, <kbd style={styles.kbd}>Shift+Enter</kbd> for new line
+            {voiceActive ? (
+              <>
+                <kbd style={styles.kbd}>Mic</kbd> to speak, <kbd style={styles.kbd}>Enter</kbd> to type
+              </>
+            ) : (
+              <>
+                Press <kbd style={styles.kbd}>Enter</kbd> to send, <kbd style={styles.kbd}>Shift+Enter</kbd> for new line
+              </>
+            )}
           </span>
           <div style={styles.agentStatus}>
-            <div className="status-dot processing" />
-            <span>4 agents ready</span>
+            {voiceActive && voice.isConnected ? (
+              <>
+                <div className="status-dot processing" style={{ background: 'var(--emerald)' }} />
+                <span style={{ color: 'var(--emerald)' }}>Voice active</span>
+              </>
+            ) : (
+              <>
+                <div className="status-dot processing" />
+                <span>4 agents ready</span>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -648,8 +783,28 @@ const styles: { [key: string]: React.CSSProperties } = {
     borderRadius: 'var(--radius-md)',
     position: 'relative',
   },
+  bigVoiceBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 'var(--space-sm)',
+    padding: 'var(--space-sm) var(--space-lg)',
+    background: 'linear-gradient(135deg, var(--cyan), var(--cyan-dim))',
+    border: 'none',
+    borderRadius: 'var(--radius-lg)',
+    color: 'var(--void)',
+    fontSize: '0.9375rem',
+    fontWeight: 600,
+    cursor: 'pointer',
+    boxShadow: '0 0 20px rgba(0, 245, 212, 0.3)',
+    transition: 'all 0.2s ease',
+  },
   voiceActive: {
     color: 'var(--cyan)',
+    background: 'rgba(0, 245, 212, 0.1)',
+  },
+  voiceRecording: {
+    color: 'var(--rose)',
+    background: 'rgba(255, 82, 82, 0.1)',
   },
   voicePulseSmall: {
     position: 'absolute',
@@ -658,6 +813,14 @@ const styles: { [key: string]: React.CSSProperties } = {
     border: '1px solid var(--cyan)',
     opacity: 0.5,
     animation: 'pulse-glow 1.5s ease-in-out infinite',
+  },
+  voiceRecordingPulse: {
+    position: 'absolute',
+    inset: '-4px',
+    borderRadius: 'var(--radius-md)',
+    border: '2px solid var(--rose)',
+    opacity: 0.7,
+    animation: 'pulse-glow 0.8s ease-in-out infinite',
   },
   textarea: {
     flex: 1,

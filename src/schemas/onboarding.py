@@ -87,6 +87,9 @@ class VoiceSessionRequest(BaseModel):
 
     topic: str | None = None  # Current topic to discuss
     resume: bool = True  # Resume from last position
+    user_role: str | None = None  # User role for context
+
+    model_config = {"extra": "ignore"}  # Ignore unknown fields
 
 
 class VoiceSessionResponse(BaseModel):
