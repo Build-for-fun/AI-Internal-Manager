@@ -1,24 +1,67 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { useMemo, useState } from 'react'
 import Layout from './components/Layout'
+import LandingPage from './components/LandingPage'
 import Dashboard from './components/Dashboard'
 import ChatInterface from './components/ChatInterface'
 import KnowledgeGraph from './components/KnowledgeGraph'
 import TeamAnalytics from './components/TeamAnalytics'
 import Onboarding from './components/Onboarding'
+import ApiKeyModal from './components/ApiKeyModal'
 import { RbacProvider, useRbac } from './contexts/RbacContext'
+import { ApiKeyProvider, useApiKey } from './contexts/ApiKeyContext'
 
 function App() {
   const [voiceActive, setVoiceActive] = useState(false)
 
   return (
-    <RbacProvider>
-      <div className="scanline">
-        <Layout voiceActive={voiceActive} setVoiceActive={setVoiceActive}>
-          <AppRoutes voiceActive={voiceActive} setVoiceActive={setVoiceActive} />
-        </Layout>
-      </div>
-    </RbacProvider>
+    <ApiKeyProvider>
+      <RbacProvider>
+        <Routes>
+          <Route path="/" element={<LandingPage />} />
+          <Route
+            path="/*"
+            element={
+              <ProtectedApp voiceActive={voiceActive} setVoiceActive={setVoiceActive} />
+            }
+          />
+        </Routes>
+      </RbacProvider>
+    </ApiKeyProvider>
+  )
+}
+
+function ProtectedApp({
+  voiceActive,
+  setVoiceActive,
+}: {
+  voiceActive: boolean
+  setVoiceActive: (active: boolean) => void
+}) {
+  const { isAuthenticated, setApiKey } = useApiKey()
+  const [showModal, setShowModal] = useState(!isAuthenticated)
+
+  const handleApiKeySubmit = (key: string) => {
+    setApiKey(key)
+    setShowModal(false)
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <ApiKeyModal
+        isOpen={showModal}
+        onClose={() => setShowModal(false)}
+        onSubmit={handleApiKeySubmit}
+      />
+    )
+  }
+
+  return (
+    <div className="scanline">
+      <Layout voiceActive={voiceActive} setVoiceActive={setVoiceActive}>
+        <AppRoutes voiceActive={voiceActive} setVoiceActive={setVoiceActive} />
+      </Layout>
+    </div>
   )
 }
 
@@ -75,7 +118,7 @@ function AppRoutes({
 
   return (
     <Routes>
-      <Route path="/" element={<Dashboard />} />
+      <Route path="/dashboard" element={<Dashboard />} />
       <Route
         path="/chat"
         element={
@@ -98,7 +141,7 @@ function AppRoutes({
         path="/onboarding"
         element={canViewOnboarding ? <Onboarding /> : <AccessDenied />}
       />
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
   )
 }
