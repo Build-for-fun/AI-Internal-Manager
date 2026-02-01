@@ -73,7 +73,7 @@ async def classify_intent_node(state: ConversationState) -> dict[str, Any]:
     }
 
 
-def route_by_intent(state: ConversationState) -> Literal["knowledge", "onboarding", "team_analysis", "direct_response", "clarification"]:
+def route_by_intent(state: ConversationState) -> Literal["knowledge", "onboarding", "team_analysis", "evaluator", "direct_response", "clarification"]:
     """Route to the appropriate agent based on intent."""
     intent = state.get("intent")
 
@@ -83,6 +83,8 @@ def route_by_intent(state: ConversationState) -> Literal["knowledge", "onboardin
         return "onboarding"
     elif intent == Intent.TEAM_ANALYSIS:
         return "team_analysis"
+    elif intent == Intent.EVALUATOR:
+        return "evaluator"
     elif intent == Intent.DIRECT_RESPONSE:
         return "direct_response"
     else:
@@ -150,6 +152,26 @@ async def team_analysis_agent_node(state: ConversationState) -> dict[str, Any]:
         "response": result["response"],
         "sources": result.get("sources"),
         "active_agent": "team_analysis",
+    }
+
+
+async def evaluator_agent_node(state: ConversationState) -> dict[str, Any]:
+    """Node that invokes the evaluator agent."""
+    from src.agents.evaluator.agent import evaluator_agent
+
+    result = await evaluator_agent.process(
+        query=state["current_query"],
+        context={
+            "user_id": state["user_id"],
+            "memory_context": state.get("memory_context", {}),
+            "messages": state.get("messages", []),
+        },
+    )
+
+    return {
+        "response": result["response"],
+        "sources": result.get("sources"),
+        "active_agent": "evaluator",
     }
 
 
@@ -232,6 +254,7 @@ def create_orchestrator_graph() -> StateGraph:
     graph.add_node("knowledge", knowledge_agent_node)
     graph.add_node("onboarding", onboarding_agent_node)
     graph.add_node("team_analysis", team_analysis_agent_node)
+    graph.add_node("evaluator", evaluator_agent_node)
     graph.add_node("direct_response", direct_response_node)
     graph.add_node("clarification", clarification_node)
 
@@ -246,6 +269,7 @@ def create_orchestrator_graph() -> StateGraph:
             "knowledge": "knowledge",
             "onboarding": "onboarding",
             "team_analysis": "team_analysis",
+            "evaluator": "evaluator",
             "direct_response": "direct_response",
             "clarification": "clarification",
         },
@@ -255,6 +279,7 @@ def create_orchestrator_graph() -> StateGraph:
     graph.add_edge("knowledge", END)
     graph.add_edge("onboarding", END)
     graph.add_edge("team_analysis", END)
+    graph.add_edge("evaluator", END)
     graph.add_edge("direct_response", END)
     graph.add_edge("clarification", END)
 

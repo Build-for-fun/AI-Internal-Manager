@@ -18,6 +18,7 @@ class Intent(str, Enum):
     KNOWLEDGE = "knowledge"  # Questions about company knowledge, processes, docs
     ONBOARDING = "onboarding"  # Onboarding-related queries
     TEAM_ANALYSIS = "team_analysis"  # Team health, metrics, analytics
+    EVALUATOR = "evaluator"  # LLM evaluation, quality assessment, model testing
     DIRECT_RESPONSE = "direct_response"  # Simple queries, general knowledge, or greetings that don't need company data
     CLARIFICATION = "clarification"  # Need more information from user
 
@@ -59,6 +60,7 @@ Available intents:
 - knowledge: Questions about company documentation, processes, projects, tools, or past decisions
 - onboarding: Questions from new employees, requests for onboarding help, introductions to the company
 - team_analysis: Questions about team performance, metrics, workload, velocity, bottlenecks
+- evaluator: Requests to evaluate LLM outputs, test model quality, run evaluations, or assess AI responses
 - direct_response: Greetings, general knowledge questions, coding help, or queries not specific to company internal data
 - clarification: When the query is too vague or ambiguous to classify AND there is no conversation history to provide context
 
@@ -79,6 +81,12 @@ Response: onboarding|0.9
 
 User: "What's our team's velocity this sprint?"
 Response: team_analysis|0.95
+
+User: "Evaluate the quality of this LLM response"
+Response: evaluator|0.95
+
+User: "Run evaluations on the chatbot output"
+Response: evaluator|0.9
 
 User: "Hi!"
 Response: direct_response|1.0

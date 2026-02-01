@@ -67,6 +67,7 @@ The orchestrator (`src/agents/orchestrator/`) uses a LangGraph state machine wit
 - `knowledge/` - Hybrid search across Neo4j graph + Qdrant vectors
 - `onboarding/` - Role-specific flows with voice support
 - `team_analysis/` - Metrics from Jira/GitHub/Slack via MCP connectors
+- `evaluator/` - LLM output evaluation via Keywords AI evaluators
 
 ### Memory Hierarchy (src/memory/)
 
@@ -142,6 +143,9 @@ Main entry points:
 - `WebSocket /api/v1/voice/ws/{id}` - Voice streaming
 - `POST /api/v1/knowledge/search` - Semantic search
 - `GET /api/v1/analytics/team/{id}/health` - Team metrics
+- `POST /api/v1/evaluator/evaluate` - Evaluate LLM output via Keywords AI
+- `POST /api/v1/evaluator/generate-and-evaluate` - Generate and evaluate in one call
+- `POST /api/v1/evaluator/batch-evaluate` - Batch evaluate multiple outputs
 - `GET /health` - Health check
 
 ## Environment Variables

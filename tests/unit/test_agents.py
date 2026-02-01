@@ -5,6 +5,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.agents.orchestrator.intents import Intent, IntentClassifier
 from src.agents.knowledge.agent import KnowledgeAgent
+from src.agents.evaluator.agent import EvaluatorAgent
+from src.agents.evaluator.schemas import (
+    EvalParams,
+    EvaluatorConfig,
+    EvalInputs,
+    EvaluationStatus,
+)
 from src.agents.onboarding.flows import (
     OnboardingPhase,
     get_flow_for_user,
@@ -209,3 +216,132 @@ class TestKnowledgeAgent:
 
         assert "User preference" in result
         assert "Team norm" in result
+
+
+class TestEvaluatorAgent:
+    """Tests for evaluator agent."""
+
+    @pytest.fixture
+    def agent(self):
+        return EvaluatorAgent()
+
+    def test_build_eval_params_basic(self, agent):
+        """Test building basic eval params."""
+        params = agent._build_eval_params(
+            evaluator_slugs=["tone-checker", "grammar-validator"]
+        )
+
+        assert len(params.evaluators) == 2
+        assert params.evaluators[0].evaluator_slug == "tone-checker"
+        assert params.evaluators[1].evaluator_slug == "grammar-validator"
+        assert params.eval_inputs is None
+
+    def test_build_eval_params_with_ideal_output(self, agent):
+        """Test building eval params with ideal output."""
+        params = agent._build_eval_params(
+            evaluator_slugs=["factual-correctness"],
+            ideal_output="The answer is 42"
+        )
+
+        assert params.eval_inputs is not None
+        assert params.eval_inputs.ideal_output == "The answer is 42"
+
+    def test_build_eval_params_with_custom_inputs(self, agent):
+        """Test building eval params with custom inputs."""
+        params = agent._build_eval_params(
+            evaluator_slugs=["custom-eval"],
+            eval_inputs={"custom_field": "value"}
+        )
+
+        assert params.eval_inputs is not None
+        assert params.eval_inputs.custom_inputs == {"custom_field": "value"}
+
+    def test_format_evaluation_history_empty(self, agent):
+        """Test formatting with empty history."""
+        result = agent._format_evaluation_history([])
+        assert "No recent evaluations" in result
+
+    def test_format_evaluation_history(self, agent):
+        """Test formatting evaluation history."""
+        history = [
+            {"status": "completed", "evaluators": ["tone-checker"]},
+            {"status": "pending", "evaluators": ["grammar-validator", "factual"]},
+        ]
+        result = agent._format_evaluation_history(history)
+
+        assert "completed" in result
+        assert "tone-checker" in result
+        assert "pending" in result
+
+    @pytest.mark.asyncio
+    async def test_evaluate_no_evaluators(self, agent):
+        """Test evaluate returns error when no evaluators specified."""
+        result = await agent.evaluate(
+            completion_message={"role": "assistant", "content": "Hello"},
+            evaluator_slugs=[]
+        )
+
+        assert result.status == EvaluationStatus.FAILED
+        assert "No evaluators specified" in result.results[0].error
+
+    @pytest.mark.asyncio
+    async def test_classify_evaluator_intent(self):
+        """Test classification of evaluator queries."""
+        classifier = IntentClassifier()
+
+        # Create proper async mock based on provider
+        mock_client = MagicMock()
+        if classifier.provider == "keywords_ai":
+            # OpenAI-style response
+            mock_client.chat.completions.create = AsyncMock(
+                return_value=MagicMock(
+                    choices=[MagicMock(
+                        message=MagicMock(content="evaluator|0.95")
+                    )]
+                )
+            )
+        else:
+            # Anthropic-style response
+            mock_client.messages.create = AsyncMock(
+                return_value=MagicMock(
+                    content=[MagicMock(text="evaluator|0.95")]
+                )
+            )
+
+        with patch.object(classifier, "client", mock_client):
+            intent, confidence = await classifier.classify(
+                "Evaluate the quality of this LLM response"
+            )
+
+            assert intent == Intent.EVALUATOR
+            assert confidence == 0.95
+
+
+class TestEvaluatorSchemas:
+    """Tests for evaluator schemas."""
+
+    def test_evaluator_config(self):
+        """Test EvaluatorConfig creation."""
+        config = EvaluatorConfig(evaluator_slug="test-evaluator")
+        assert config.evaluator_slug == "test-evaluator"
+
+    def test_eval_inputs(self):
+        """Test EvalInputs creation."""
+        inputs = EvalInputs(
+            ideal_output="Expected output",
+            custom_inputs={"key": "value"}
+        )
+        assert inputs.ideal_output == "Expected output"
+        assert inputs.custom_inputs == {"key": "value"}
+
+    def test_eval_params(self):
+        """Test EvalParams creation."""
+        params = EvalParams(
+            evaluators=[
+                EvaluatorConfig(evaluator_slug="eval1"),
+                EvaluatorConfig(evaluator_slug="eval2"),
+            ],
+            eval_inputs=EvalInputs(ideal_output="test")
+        )
+        assert len(params.evaluators) == 2
+        assert params.eval_inputs.ideal_output == "test"

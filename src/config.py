@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,6 +14,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",  # Ignore extra env vars that don't match field names
     )
 
     # Application
@@ -53,8 +54,14 @@ class Settings(BaseSettings):
     anthropic_max_tokens: int = 4096
 
     # Keywords AI
-    keywords_ai_api_key: SecretStr = Field(default=SecretStr(""))
-    keywords_ai_base_url: str = "https://api.keywordsai.co/api/"
+    keywords_ai_api_key: SecretStr = Field(
+        default=SecretStr(""),
+        validation_alias=AliasChoices("keywords_ai_api_key", "keywordsai_api_key"),
+    )
+    keywords_ai_base_url: str = Field(
+        default="https://api.keywordsai.co/api/",
+        validation_alias=AliasChoices("keywords_ai_base_url", "keywordsai_base_url"),
+    )
     keywords_ai_default_model: str = "gpt-4o"  # Default to GPT-4o for broader compatibility
 
     # Keywords AI Caching
