@@ -48,13 +48,14 @@ class Settings(BaseSettings):
     # Anthropic
     anthropic_api_key: SecretStr = Field(default=SecretStr(""))
     anthropic_default_model: str = "claude-3-5-sonnet-20241022"
+    anthropic_fast_model: str = "claude-3-5-haiku-20241022"  # For classification/simple tasks
     anthropic_reasoning_model: str = "claude-3-opus-20240229"
     anthropic_max_tokens: int = 4096
 
     # Keywords AI
     keywords_ai_api_key: SecretStr = Field(default=SecretStr(""))
     keywords_ai_base_url: str = "https://api.keywordsai.co/api/"
-    keywords_ai_default_model: str = "gpt-4o"
+    keywords_ai_default_model: str = "gpt-4o"  # Default to GPT-4o for broader compatibility
 
     # LLM Provider
     llm_provider: Literal["anthropic", "keywords_ai"] = "anthropic"

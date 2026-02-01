@@ -372,6 +372,119 @@ class Neo4jClient:
             records = await result.data()
             return [dict(r["c"]) for r in records]
 
+    # Convenience methods for seeding and common operations
+
+    async def create_or_update_node(
+        self,
+        node_type: str,
+        properties: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Create or update a node by ID."""
+        node_id = properties.get("id")
+        if not node_id:
+            raise ValueError("Node properties must include 'id'")
+
+        # Use compatible syntax for older Neo4j versions
+        query = f"""
+        MERGE (n:{node_type} {{id: $id}})
+        SET n += $props
+        SET n.updated_at = datetime()
+        SET n.created_at = coalesce(n.created_at, datetime())
+        RETURN n
+        """
+
+        async with self.driver.session() as session:
+            result = await session.run(query, id=node_id, props=properties)
+            record = await result.single()
+            return dict(record["n"]) if record else {}
+
+    async def create_relationship_by_type(
+        self,
+        from_type: str,
+        from_id: str,
+        to_type: str,
+        to_id: str,
+        relationship_type: str,
+        properties: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Create a relationship between nodes specified by type and ID."""
+        props = properties or {}
+
+        query = f"""
+        MATCH (a:{from_type} {{id: $from_id}})
+        MATCH (b:{to_type} {{id: $to_id}})
+        MERGE (a)-[r:{relationship_type}]->(b)
+        SET r += $props
+        SET r.created_at = coalesce(r.created_at, datetime())
+        RETURN r, a, b
+        """
+
+        async with self.driver.session() as session:
+            result = await session.run(
+                query, from_id=from_id, to_id=to_id, props=props
+            )
+            record = await result.single()
+            if record:
+                return {
+                    "relationship": dict(record["r"]),
+                    "source": dict(record["a"]),
+                    "target": dict(record["b"]),
+                }
+            return {}
+
+    async def get_department_hierarchy(self) -> list[dict[str, Any]]:
+        """Get the full textbook hierarchy organized by department."""
+        query = """
+        MATCH (d:Department)
+        OPTIONAL MATCH (d)-[:HAS_SUBDEPARTMENT]->(sd:SubDepartment)
+        OPTIONAL MATCH (sd)-[:HAS_TOPIC]->(t:Topic)
+        OPTIONAL MATCH (t)-[:HAS_CONTEXT]->(c:Context)
+        OPTIONAL MATCH (t)-[:HAS_SUMMARY]->(s:Summary)
+        RETURN d, collect(DISTINCT sd) as subdepts,
+               collect(DISTINCT t) as topics,
+               collect(DISTINCT c) as contexts,
+               collect(DISTINCT s) as summaries
+        ORDER BY d.title
+        """
+
+        async with self.driver.session() as session:
+            result = await session.run(query)
+            records = await result.data()
+            return records
+
+    async def store_chat_context(
+        self,
+        department_id: str,
+        topic_id: str,
+        content: str,
+        title: str,
+        source_type: str = "chat",
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Store a chat context in the knowledge graph under a topic."""
+        context_id = str(uuid4())
+        properties = {
+            "id": context_id,
+            "title": title,
+            "content": content,
+            "source_type": source_type,
+            "topic_id": topic_id,
+            "department_id": department_id,
+            **(metadata or {}),
+        }
+
+        # Create context node
+        context = await self.create_node(NodeLabels.CONTEXT, properties)
+
+        # Link to topic
+        await self.create_relationship(
+            topic_id,
+            context_id,
+            RelationshipTypes.HAS_CONTEXT,
+        )
+
+        return context
+
 
 # Singleton instance
 neo4j_client = Neo4jClient()

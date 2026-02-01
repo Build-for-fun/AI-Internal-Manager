@@ -76,19 +76,22 @@ SAMPLE_DEPARTMENTS = [
         "id": "dept-engineering",
         "title": "Engineering",
         "description": "Core product engineering team",
-        "metadata": {"budget": 500000, "headcount": 25},
+        "budget": 500000,
+        "headcount": 25,
     },
     {
         "id": "dept-product",
         "title": "Product",
         "description": "Product management and strategy",
-        "metadata": {"budget": 200000, "headcount": 8},
+        "budget": 200000,
+        "headcount": 8,
     },
     {
         "id": "dept-analytics",
         "title": "Analytics",
         "description": "Data and analytics platform",
-        "metadata": {"budget": 300000, "headcount": 10},
+        "budget": 300000,
+        "headcount": 10,
     },
 ]
 
@@ -434,7 +437,7 @@ When an access token expires, the client uses the refresh token to get a new acc
 async def create_database_session():
     """Create async database session."""
     engine = create_async_engine(
-        settings.DATABASE_URL,
+        settings.database_url,
         echo=False,
         future=True,
     )
@@ -502,58 +505,69 @@ async def seed_postgresql(async_session):
 
 
 async def seed_neo4j():
-    """Seed Neo4j with knowledge graph."""
+    """Seed Neo4j with knowledge graph (textbook architecture).
+
+    Structure:
+    - Department (chapter)
+      - SubDepartment (section)
+        - Topic (subsection)
+          - Context (individual knowledge pieces from chats/docs)
+          - Summary (consolidated summaries)
+    """
     logger.info("Seeding Neo4j knowledge graph...")
 
     try:
-        # Create departments
+        # Connect to Neo4j first
+        await neo4j_client.connect()
+
+        # Create departments (chapters)
         for dept in SAMPLE_DEPARTMENTS:
             await neo4j_client.create_or_update_node(
                 node_type="Department",
                 properties=dept,
             )
-        logger.info(f"Created {len(SAMPLE_DEPARTMENTS)} departments")
+        logger.info(f"Created {len(SAMPLE_DEPARTMENTS)} departments (chapters)")
 
-        # Create subdepartments
+        # Create subdepartments (sections)
         for sub in SAMPLE_SUBDEPARTMENTS:
             await neo4j_client.create_or_update_node(
                 node_type="SubDepartment",
                 properties=sub,
             )
             # Create relationship to department
-            await neo4j_client.create_relationship(
+            await neo4j_client.create_relationship_by_type(
                 from_type="Department",
                 from_id=sub["department_id"],
                 to_type="SubDepartment",
                 to_id=sub["id"],
                 relationship_type="HAS_SUBDEPARTMENT",
             )
-        logger.info(f"Created {len(SAMPLE_SUBDEPARTMENTS)} subdepartments")
+        logger.info(f"Created {len(SAMPLE_SUBDEPARTMENTS)} subdepartments (sections)")
 
-        # Create topics
+        # Create topics (subsections)
         for topic in SAMPLE_TOPICS:
             await neo4j_client.create_or_update_node(
                 node_type="Topic",
                 properties=topic,
             )
             # Create relationship to subdepartment
-            await neo4j_client.create_relationship(
+            await neo4j_client.create_relationship_by_type(
                 from_type="SubDepartment",
                 from_id=topic["sub_department_id"],
                 to_type="Topic",
                 to_id=topic["id"],
                 relationship_type="HAS_TOPIC",
             )
-        logger.info(f"Created {len(SAMPLE_TOPICS)} topics")
+        logger.info(f"Created {len(SAMPLE_TOPICS)} topics (subsections)")
 
-        # Create context nodes
+        # Create context nodes (individual knowledge pieces)
         for context in SAMPLE_CONTEXTS:
             await neo4j_client.create_or_update_node(
                 node_type="Context",
                 properties=context,
             )
             # Create relationship to topic
-            await neo4j_client.create_relationship(
+            await neo4j_client.create_relationship_by_type(
                 from_type="Topic",
                 from_id=context["topic_id"],
                 to_type="Context",
@@ -578,10 +592,13 @@ async def seed_neo4j():
 
 
 async def seed_qdrant():
-    """Seed Qdrant with vector embeddings."""
+    """Seed Qdrant with vector embeddings for textbook knowledge."""
     logger.info("Seeding Qdrant embeddings...")
 
     try:
+        # Initialize collections first
+        await embedder.init_collections()
+        logger.info("Qdrant collections initialized")
         # Prepare embedding documents
         documents = []
 

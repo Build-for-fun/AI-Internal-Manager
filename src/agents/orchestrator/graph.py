@@ -4,10 +4,9 @@ This module defines the state graph that manages conversation flow
 and routes between specialized agents.
 """
 
-from typing import Annotated, Any, Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 from langgraph.graph import END, StateGraph
-from langgraph.graph.message import add_messages
 
 from src.agents.orchestrator.intents import Intent, intent_classifier
 
@@ -18,8 +17,8 @@ class ConversationState(TypedDict):
     This state is passed between nodes and persisted for each conversation.
     """
 
-    # Message history
-    messages: Annotated[list[dict[str, Any]], add_messages]
+    # Message history (kept as plain dicts for compatibility with LLM APIs)
+    messages: list[dict[str, Any]]
 
     # Current query being processed
     current_query: str
@@ -59,10 +58,11 @@ async def classify_intent_node(state: ConversationState) -> dict[str, Any]:
     """Node that classifies the user's intent."""
     query = state["current_query"]
 
-    # Build context for classification
+    # Build context for classification, including message history for follow-ups
     context = {
         "is_new_employee": state.get("conversation_type") == "onboarding",
         "current_flow": state.get("active_agent"),
+        "messages": state.get("messages", []),  # Include history for follow-up context
     }
 
     intent, confidence = await intent_classifier.classify(query, context)
@@ -181,7 +181,7 @@ async def direct_response_node(state: ConversationState) -> dict[str, Any]:
     else:
         client = AsyncAnthropic(api_key=settings.anthropic_api_key.get_secret_value())
         response = await client.messages.create(
-            model="claude-3-5-haiku-20241022",
+            model=settings.anthropic_fast_model,
             max_tokens=500,
             system=system_prompt,
             messages=[{"role": "user", "content": query}],

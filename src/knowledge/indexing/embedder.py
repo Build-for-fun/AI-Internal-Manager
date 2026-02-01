@@ -41,6 +41,7 @@ class EmbeddingService:
             self._client = AsyncQdrantClient(
                 host=settings.qdrant_host,
                 port=settings.qdrant_port,
+                check_compatibility=False,  # Allow version mismatch between client and server
             )
         return self._client
 
@@ -48,17 +49,23 @@ class EmbeddingService:
         """Initialize all Qdrant collections."""
         for collection_name in self.collections.values():
             try:
-                # Check if collection exists
-                exists = await self.client.collection_exists(collection_name)
-                if not exists:
-                    await self.client.create_collection(
-                        collection_name=collection_name,
-                        vectors_config=VectorParams(
-                            size=settings.embedding_dimension,
-                            distance=Distance.COSINE,
-                        ),
-                    )
-                    logger.info("Created collection", collection=collection_name)
+                # Try to get collection info to check if it exists
+                # This works with both old and new Qdrant versions
+                try:
+                    await self.client.get_collection(collection_name)
+                    logger.info("Collection exists", collection=collection_name)
+                    continue  # Collection already exists
+                except Exception:
+                    pass  # Collection doesn't exist, create it
+
+                await self.client.create_collection(
+                    collection_name=collection_name,
+                    vectors_config=VectorParams(
+                        size=settings.embedding_dimension,
+                        distance=Distance.COSINE,
+                    ),
+                )
+                logger.info("Created collection", collection=collection_name)
             except Exception as e:
                 logger.error("Failed to create collection", collection=collection_name, error=str(e))
 
@@ -188,22 +195,43 @@ class EmbeddingService:
                     )
                 qdrant_filter = Filter(must=conditions)
 
-            # Search
-            results = await self.client.search(
-                collection_name=collection_name,
-                query_vector=query_embedding,
-                limit=limit,
-                query_filter=qdrant_filter,
-                score_threshold=score_threshold,
-            )
+            # Use HTTP API directly for compatibility with older Qdrant versions
+            import httpx
+
+            search_body: dict[str, Any] = {
+                "vector": query_embedding,
+                "limit": limit,
+                "with_payload": True,
+            }
+            if score_threshold > 0:
+                search_body["score_threshold"] = score_threshold
+            if qdrant_filter:
+                search_body["filter"] = {
+                    "must": [
+                        {"key": cond.key, "match": {"value": cond.match.value}}
+                        for cond in qdrant_filter.must
+                    ]
+                }
+
+            async with httpx.AsyncClient() as http_client:
+                response = await http_client.post(
+                    f"http://{settings.qdrant_host}:{settings.qdrant_port}/collections/{collection_name}/points/search",
+                    json=search_body,
+                    timeout=30.0,
+                )
+                data = response.json()
+
+            if "result" not in data:
+                logger.warning("Search returned no results", collection=collection, data=data)
+                return []
 
             return [
                 {
-                    "score": hit.score,
-                    "payload": hit.payload,
-                    "id": hit.id,
+                    "score": hit.get("score", 0),
+                    "payload": hit.get("payload", {}),
+                    "id": hit.get("id"),
                 }
-                for hit in results
+                for hit in data["result"]
             ]
         except Exception as e:
             logger.warning("Search failed", collection=collection, error=str(e))
@@ -294,6 +322,76 @@ class EmbeddingService:
         )
 
         return count_before.count
+
+    async def embed_and_store(
+        self,
+        documents: list[dict[str, Any]],
+    ) -> list[str]:
+        """Embed and store multiple documents.
+
+        Each document should have:
+        - text: The text to embed
+        - collection: Which collection to store in ('knowledge', 'org_memory', etc.)
+        - Additional metadata fields
+
+        Returns list of stored point IDs.
+        """
+        stored_ids = []
+
+        for doc in documents:
+            text = doc.get("text", "")
+            collection = doc.get("collection", "knowledge")
+
+            if not text:
+                continue
+
+            # Build metadata (exclude text and collection)
+            metadata = {k: v for k, v in doc.items() if k not in ("text", "collection")}
+
+            try:
+                point_id = await self.store_embedding(
+                    collection=collection,
+                    text=text,
+                    metadata=metadata,
+                )
+                stored_ids.append(point_id)
+            except Exception as e:
+                logger.warning(
+                    "Failed to embed document",
+                    title=doc.get("title", "untitled"),
+                    error=str(e),
+                )
+
+        return stored_ids
+
+    async def store_chat_embedding(
+        self,
+        department: str,
+        topic: str,
+        chat_content: str,
+        summary: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        """Store a chat interaction embedding for the textbook architecture.
+
+        This is used to build the department-organized knowledge base
+        where chats are embedded and can be retrieved by department/topic.
+        """
+        text_to_embed = summary if summary else chat_content
+
+        embedding_metadata = {
+            "department": department,
+            "topic": topic,
+            "content_type": "chat_summary" if summary else "chat",
+            "original_content": chat_content[:500] if len(chat_content) > 500 else chat_content,
+            **(metadata or {}),
+        }
+
+        return await self.store_embedding(
+            collection="knowledge",
+            text=text_to_embed,
+            metadata=embedding_metadata,
+        )
 
 
 # Singleton instance

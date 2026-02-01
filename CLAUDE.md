@@ -1,229 +1,175 @@
-# AI Internal Manager - Claude Code Guide
+# CLAUDE.md
 
-## Quick Reference
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-### Common Commands
+## Common Commands
 
 ```bash
-# Start development environment
+# Start all Docker services (PostgreSQL, Redis, Neo4j, Qdrant)
 cd docker && docker-compose up -d
 
-# Install dependencies
+# Install Python dependencies
 pip install -e ".[dev]"
 
 # Run the API server
 uvicorn src.main:app --reload
 
+# Frontend (separate terminal)
+cd frontend && npm install && npm run dev
+
 # Run tests
-pytest                          # All tests with coverage
-pytest tests/unit              # Unit tests only
-pytest tests/integration       # Integration tests only
-pytest tests/e2e               # End-to-end tests only
-pytest -k "test_name"          # Run specific test
+pytest                              # All tests with coverage
+pytest tests/unit                   # Unit tests only
+pytest tests/integration            # Integration tests only
+pytest -k "test_name"               # Run specific test
+pytest --cov-report=html            # HTML coverage report
 
 # Database migrations
-alembic upgrade head           # Apply migrations
+alembic upgrade head                # Apply migrations
 alembic revision --autogenerate -m "description"  # Create migration
 
 # Code quality
-ruff check src tests           # Linting
-ruff format src tests          # Formatting
-mypy src                       # Type checking
+ruff check src tests                # Linting
+ruff format src tests               # Formatting
+mypy src                            # Type checking
 
-# Start Celery worker
+# Celery (background tasks)
 celery -A workers.celery_app worker --loglevel=info
-
-# Start Celery beat (scheduler)
 celery -A workers.celery_app beat --loglevel=info
+
+# Seed sample data (for development)
+python seed_sample_data.py
 ```
 
-### Services (Docker Compose)
+### Docker Services
 
-- **PostgreSQL**: localhost:5432 (user: ai_manager, db: ai_manager)
-- **Redis**: localhost:6379
-- **Neo4j**: localhost:7687 (browser: localhost:7474)
-- **Qdrant**: localhost:6333 (dashboard: localhost:6333/dashboard)
+| Service | Port | Dashboard/Browser |
+|---------|------|-------------------|
+| PostgreSQL | 5432 | user: ai_manager |
+| Redis | 6379 | - |
+| Neo4j | 7687 | http://localhost:7474 |
+| Qdrant | 6333 | http://localhost:6333/dashboard |
 
 ## Architecture Overview
 
-### Multi-Agent System with LangGraph
-
-The system uses a **LangGraph state machine** for agent orchestration:
+### Multi-Agent Orchestration (LangGraph)
 
 ```
 User Query → Intent Classification → Router → Specialized Agent → Response
 ```
 
-**Key agents:**
-- `src/agents/orchestrator/` - Main orchestrator with intent classification and routing
-- `src/agents/knowledge/` - Knowledge retrieval using hybrid search
-- `src/agents/onboarding/` - Role-specific onboarding with voice support
-- `src/agents/team_analysis/` - Team metrics and bottleneck detection
+The orchestrator (`src/agents/orchestrator/`) uses a LangGraph state machine with `ConversationState` (TypedDict). Key files:
+- `graph.py` - State machine definition and transitions
+- `intents.py` - Intent patterns for routing
+- `agent.py` - Main orchestrator logic
 
-The orchestrator uses `ConversationState` (TypedDict) to manage state across agent transitions. See `src/agents/orchestrator/graph.py` for the state machine definition.
+**Specialized Agents** (all extend `BaseAgent` in `src/agents/base.py`):
+- `knowledge/` - Hybrid search across Neo4j graph + Qdrant vectors
+- `onboarding/` - Role-specific flows with voice support
+- `team_analysis/` - Metrics from Jira/GitHub/Slack via MCP connectors
 
-### Memory Hierarchy
+### Memory Hierarchy (src/memory/)
 
-Four-tier memory system in `src/memory/`:
+| Tier | Backend | TTL | Purpose |
+|------|---------|-----|---------|
+| Short-term | Redis | 1 hour | Active conversation context |
+| User | Qdrant | Persistent | Individual preferences/history |
+| Team | Qdrant | Persistent | Team decisions and norms |
+| Org | Qdrant | Persistent | Company policies/best practices |
 
-1. **Short-term** (Redis, 1hr TTL): Active conversation context
-2. **User memory** (Qdrant): Individual preferences and history
-3. **Team memory** (Qdrant): Team decisions and norms
-4. **Org memory** (Qdrant): Company policies and best practices
-
-`MemoryManager` (`src/memory/manager.py`) orchestrates retrieval across all tiers with re-ranking.
+`MemoryManager` (`manager.py`) orchestrates retrieval across all tiers with re-ranking.
 
 ### Knowledge Graph (Neo4j)
 
-Hierarchical "textbook" structure:
+Hierarchical structure: `Organization → Department → SubDepartment → Topic → Context`
 
-```
-Organization → Department → SubDepartment → Topic → Context
-```
+Node types defined in `src/knowledge/graph/schema.py`: Department, SubDepartment, Topic, Context, Summary, Entity, Person, Project, Decision
 
-**Node types**: `Department`, `SubDepartment`, `Topic`, `Context`, `Summary`, `Entity`, `Person`
+### MCP Connectors (src/mcp/)
 
-Schema defined in `src/knowledge/graph/schema.py`. Use `src/knowledge/graph/client.py` for CRUD operations.
+External integrations following `BaseMCPConnector` pattern:
+- `jira/` - Issues, sprints, velocity
+- `github/` - PRs, commits, code ownership
+- `slack/` - Messages, decisions
 
-### MCP Connectors
+### LLM Configuration
 
-External service integrations in `src/mcp/`:
+The system supports two LLM providers (configured via `LLM_PROVIDER` env var):
+- `anthropic` - Uses Claude models directly
+- `keywords_ai` - Routes through Keywords AI gateway
 
-- **Jira** (`src/mcp/jira/`): Issues, sprints, velocity, blockers
-- **GitHub** (`src/mcp/github/`): PRs, commits, code ownership
-- **Slack** (`src/mcp/slack/`): Messages, decisions, communication patterns
-
-Each connector extends `BaseMCPConnector` and provides typed tools.
-
-## Project Structure
-
-```
-src/
-├── main.py                 # FastAPI entry point
-├── config.py               # Pydantic Settings
-├── api/v1/                 # REST + WebSocket endpoints
-├── agents/                 # Agent implementations
-│   ├── base.py             # BaseAgent ABC
-│   └── orchestrator/       # LangGraph state machine
-├── mcp/                    # External service connectors
-├── knowledge/              # Knowledge graph + embeddings
-│   ├── graph/              # Neo4j operations
-│   └── indexing/           # Embedding generation
-├── memory/                 # 4-tier memory system
-├── models/                 # SQLAlchemy models
-└── schemas/                # Pydantic request/response schemas
-
-workers/
-├── celery_app.py           # Celery + beat configuration
-└── tasks/                  # Ingestion & consolidation tasks
-```
+Embeddings: Voyage AI (default) or OpenAI (`EMBEDDING_PROVIDER` env var)
 
 ## Key Patterns
 
-### Async-First
+**Async-First**: All database ops, API calls, and agent logic use async/await.
 
-All database operations, API calls, and agent logic are async. Use `async/await` throughout.
+**Singleton Services**: Connection-pooled clients imported directly:
+- `from src.knowledge.graph.client import neo4j_client`
+- `from src.memory.short_term import redis_client`
+- `from src.knowledge.indexing.embedder import embedder`
 
-### Singleton Services
+**Agent Tool Loop**: Agents use `_run_with_tools()` for iterative Claude tool calling until completion.
 
-Service clients are singletons for connection pooling:
-- `src/knowledge/graph/client.py` → `neo4j_client`
-- `src/memory/short_term.py` → `redis_client`
-- `src/knowledge/indexing/embedder.py` → `embedder`
+**Pydantic Everywhere**:
+- API schemas: `src/schemas/`
+- DB models: `src/models/` (SQLAlchemy with async session)
+- Config: `src/config.py` (Pydantic Settings)
 
-### Agent Tool Use
+## Adding New Components
 
-Agents extend `BaseAgent` and use `_run_with_tools()` for iterative tool calling with Claude:
+### New Agent
+1. Create directory under `src/agents/`
+2. Extend `BaseAgent` in `agent.py`
+3. Add intent pattern in `src/agents/orchestrator/intents.py`
+4. Register node in `src/agents/orchestrator/graph.py`
 
-```python
-async def _run_with_tools(self, messages, tools, max_iterations=10):
-    # Loops until Claude returns without tool_use blocks
-```
+### New MCP Connector
+1. Create directory under `src/mcp/`
+2. Extend `BaseMCPConnector` with typed tools
+3. Register in `src/mcp/registry.py`
 
-### Pydantic Models
+### New Neo4j Node Type
+1. Add label to `src/knowledge/graph/schema.py`
+2. Add Cypher templates in `queries.py`
+3. Add client methods in `client.py`
 
-- API schemas: `src/schemas/` (request/response validation)
-- Database models: `src/models/` (SQLAlchemy with async session)
-- Config: `src/config.py` (Pydantic Settings, env vars)
+## API Endpoints
 
-## Testing
-
-```bash
-pytest                                    # Full test suite
-pytest --cov-report=html                  # HTML coverage report
-pytest tests/unit/agents/                 # Test specific module
-```
-
-Test fixtures in `tests/conftest.py` provide mocks for:
-- LLM client (`mock_llm`)
-- Neo4j client (`mock_neo4j`)
-- Redis client (`mock_redis`)
-- Qdrant client (`mock_qdrant`)
+Main entry points:
+- `POST /api/v1/chat/conversations/{id}/messages` - Chat (streaming supported)
+- `WebSocket /api/v1/chat/ws/{id}` - Real-time chat
+- `WebSocket /api/v1/voice/ws/{id}` - Voice streaming
+- `POST /api/v1/knowledge/search` - Semantic search
+- `GET /api/v1/analytics/team/{id}/health` - Team metrics
+- `GET /health` - Health check
 
 ## Environment Variables
 
-Required in `.env`:
-
+Required:
 ```bash
-# Core databases
 DATABASE_URL=postgresql+asyncpg://...
 REDIS_URL=redis://localhost:6379/0
 NEO4J_URI=bolt://localhost:7687
 QDRANT_HOST=localhost
 
-# LLM (required)
+# LLM (one required)
 ANTHROPIC_API_KEY=...
+# OR
+KEYWORDS_AI_API_KEY=...
 
 # Embeddings (one required)
 VOYAGE_API_KEY=...
-# or OPENAI_API_KEY=...
+# OR
+OPENAI_API_KEY=...
 ```
 
-Optional for full functionality:
-- `DEEPGRAM_API_KEY` / `ELEVENLABS_API_KEY` - Voice features
-- `JIRA_BASE_URL` / `JIRA_API_TOKEN` - Jira integration
+Optional:
+- `DEEPGRAM_API_KEY`, `ELEVENLABS_API_KEY` - Voice features
+- `JIRA_BASE_URL`, `JIRA_API_TOKEN` - Jira integration
 - `GITHUB_TOKEN` - GitHub integration
 - `SLACK_BOT_TOKEN` - Slack integration
 
-## Data Pipelines
+## Test Fixtures
 
-Celery tasks in `workers/tasks/`:
-
-- **Ingestion** (`ingestion.py`): Fetch from Jira/GitHub/Slack → normalize → embed → store
-- **Consolidation** (`consolidation.py`): Generate weekly/monthly summaries
-
-Schedules defined in `workers/celery_app.py` using Celery Beat.
-
-## API Endpoints
-
-Main entry points:
-- `POST /api/v1/chat/conversations/{id}/messages` - Chat with streaming
-- `WebSocket /api/v1/chat/ws/{id}` - Real-time chat
-- `WebSocket /api/v1/voice/ws/{id}` - Voice streaming
-- `POST /api/v1/knowledge/search` - Semantic search
-- `GET /api/v1/analytics/team/{id}/health` - Team health metrics
-
-Health check: `GET /health`
-
-## Common Tasks
-
-### Adding a New Agent
-
-1. Create directory under `src/agents/`
-2. Extend `BaseAgent` in `agent.py`
-3. Define tools specific to the agent
-4. Add intent pattern in `src/agents/orchestrator/intents.py`
-5. Register in orchestrator graph (`src/agents/orchestrator/graph.py`)
-
-### Adding a New MCP Connector
-
-1. Create directory under `src/mcp/`
-2. Extend `BaseMCPConnector` in `connector.py`
-3. Define tool schemas in `tools.py`
-4. Register in `src/mcp/registry.py`
-
-### Adding New Neo4j Node Types
-
-1. Add node label to `src/knowledge/graph/schema.py`
-2. Create Cypher query templates in `src/knowledge/graph/queries.py`
-3. Add client methods in `src/knowledge/graph/client.py`
+`tests/conftest.py` provides mocks: `mock_llm`, `mock_neo4j`, `mock_redis`, `mock_qdrant`

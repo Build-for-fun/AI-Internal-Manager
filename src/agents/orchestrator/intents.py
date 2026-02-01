@@ -37,7 +37,7 @@ class IntentClassifier:
             self.client = AsyncAnthropic(
                 api_key=settings.anthropic_api_key.get_secret_value()
             )
-            self.model = "claude-3-5-haiku-20241022"  # Use fast model for classification
+            self.model = settings.anthropic_fast_model  # Use fast model for classification
 
     async def classify(
         self,
@@ -57,7 +57,12 @@ Available intents:
 - onboarding: Questions from new employees, requests for onboarding help, introductions to the company
 - team_analysis: Questions about team performance, metrics, workload, velocity, bottlenecks
 - direct_response: Greetings, general knowledge questions, coding help, or queries not specific to company internal data
-- clarification: When the query is too vague or ambiguous to classify
+- clarification: When the query is too vague or ambiguous to classify AND there is no conversation history to provide context
+
+IMPORTANT: When classifying follow-up questions, consider the conversation history.
+- If the user asks "How do we secure it?" after asking about OAuth, classify as knowledge (about OAuth security)
+- If the user says "Tell me more" after discussing deployment, classify as knowledge (about deployment)
+- Follow-up questions that reference previous topics should inherit the intent of that topic
 
 Respond with ONLY the intent name, followed by a confidence score from 0-1.
 Format: intent_name|confidence
@@ -81,12 +86,27 @@ Response: direct_response|0.95
 User: "Write a python script to parse JSON"
 Response: direct_response|0.95
 
-User: "help"
+User: "help" (with no prior conversation)
 Response: clarification|0.7
+
+User: "Tell me more about that" (after discussing OAuth)
+Response: knowledge|0.9
 """
 
         user_message = f"User query: {query}"
+
+        # Add conversation history context for follow-up understanding
         if context:
+            messages = context.get("messages", [])
+            if messages:
+                # Include last 2-4 exchanges for context
+                recent_messages = messages[-4:]
+                history_text = "\n".join([
+                    f"{'User' if m.get('role') == 'user' else 'Assistant'}: {m.get('content', '')[:200]}"
+                    for m in recent_messages
+                ])
+                user_message = f"Conversation history:\n{history_text}\n\nNew user query: {query}"
+
             if context.get("is_new_employee"):
                 user_message += "\n[Context: User is a new employee in onboarding]"
             if context.get("current_flow") == "onboarding":
