@@ -127,8 +127,17 @@ class EmbeddingService:
         text: str,
         metadata: dict[str, Any],
         point_id: str | None = None,
+        tags: list[str] | None = None,
     ) -> str:
-        """Store a text embedding in Qdrant."""
+        """Store a text embedding in Qdrant.
+
+        Args:
+            collection: Collection name (knowledge, org_memory, etc.)
+            text: Text to embed
+            metadata: Additional metadata to store
+            point_id: Optional custom point ID
+            tags: Optional list of tags for cross-cutting filtering
+        """
         collection_name = self.collections.get(collection)
         if not collection_name:
             raise ValueError(f"Unknown collection: {collection}")
@@ -139,14 +148,21 @@ class EmbeddingService:
             # Generate embedding
             embedding = await self.generate_embedding(text)
 
+            # Build payload with tags
+            payload = {
+                "text": text,
+                **metadata,
+            }
+
+            # Add tags as a list field for filtering
+            if tags:
+                payload["tags"] = [t.lower().replace(" ", "-").replace("_", "-") for t in tags]
+
             # Create point
             point = PointStruct(
                 id=point_id,
                 vector=embedding,
-                payload={
-                    "text": text,
-                    **metadata,
-                },
+                payload=payload,
             )
 
             # Upsert to collection
@@ -159,6 +175,7 @@ class EmbeddingService:
                 "Stored embedding",
                 collection=collection,
                 point_id=point_id,
+                tags=tags,
             )
         except Exception as e:
             logger.warning("Failed to store embedding", collection=collection, error=str(e))
@@ -244,34 +261,136 @@ class EmbeddingService:
         keywords: list[str] | None = None,
         limit: int = 10,
         filters: dict[str, Any] | None = None,
+        tags: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """Hybrid search combining vector similarity and keyword matching.
+        """Hybrid search combining vector similarity, keyword matching, and tag filtering.
 
-        This performs vector search and optionally boosts results containing keywords.
+        This performs vector search and optionally:
+        - Boosts results containing keywords
+        - Filters/boosts results with matching tags
         """
+        # Add tag filter if provided
+        search_filters = filters.copy() if filters else {}
+
         # First, do vector search with higher limit
         vector_results = await self.search(
             collection=collection,
             query=query,
-            limit=limit * 2,
-            filters=filters,
+            limit=limit * 3,  # Get more results for post-filtering
+            filters=search_filters,
         )
 
-        if not keywords:
+        if not keywords and not tags:
             return vector_results[:limit]
 
-        # Boost scores for results containing keywords
-        keywords_lower = [k.lower() for k in keywords]
+        # Process results
+        keywords_lower = [k.lower() for k in keywords] if keywords else []
+        tags_normalized = [t.lower().replace(" ", "-").replace("_", "-") for t in tags] if tags else []
+
         for result in vector_results:
-            text = result.get("text", "").lower()
-            keyword_matches = sum(1 for k in keywords_lower if k in text)
-            # Boost score by up to 20% based on keyword matches
-            boost = min(0.2, keyword_matches * 0.05)
-            result["score"] = result["score"] * (1 + boost)
+            payload = result.get("payload", {})
+            text = payload.get("text", "").lower()
+            result_tags = payload.get("tags", [])
+
+            # Keyword boost (up to 20%)
+            if keywords_lower:
+                keyword_matches = sum(1 for k in keywords_lower if k in text)
+                keyword_boost = min(0.2, keyword_matches * 0.05)
+            else:
+                keyword_boost = 0
+
+            # Tag boost (up to 30% for matching tags)
+            if tags_normalized:
+                tag_matches = sum(1 for t in tags_normalized if t in result_tags)
+                tag_boost = min(0.3, tag_matches * 0.1)
+            else:
+                tag_boost = 0
+
+            result["score"] = result["score"] * (1 + keyword_boost + tag_boost)
+            result["keyword_matches"] = keyword_matches if keywords_lower else 0
+            result["tag_matches"] = tag_matches if tags_normalized else 0
 
         # Re-sort by boosted score
         vector_results.sort(key=lambda x: x["score"], reverse=True)
         return vector_results[:limit]
+
+    async def search_by_tags(
+        self,
+        collection: str,
+        tags: list[str],
+        query: str | None = None,
+        limit: int = 10,
+        require_all_tags: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Search primarily by tags, optionally combined with semantic search.
+
+        This allows bypassing hierarchy-based navigation entirely.
+        """
+        tags_normalized = [t.lower().replace(" ", "-").replace("_", "-") for t in tags]
+        collection_name = self.collections.get(collection)
+        if not collection_name:
+            raise ValueError(f"Unknown collection: {collection}")
+
+        try:
+            import httpx
+
+            # Build the search body
+            search_body: dict[str, Any] = {
+                "limit": limit * 2 if query else limit,
+                "with_payload": True,
+            }
+
+            # If we have a query, do vector search with tag filter
+            if query:
+                query_embedding = await self.generate_embedding(query)
+                search_body["vector"] = query_embedding
+
+            # Build tag filter
+            if require_all_tags:
+                # Must have ALL tags
+                tag_conditions = [
+                    {"key": "tags", "match": {"any": [tag]}}
+                    for tag in tags_normalized
+                ]
+                search_body["filter"] = {"must": tag_conditions}
+            else:
+                # Must have ANY of the tags
+                search_body["filter"] = {
+                    "must": [{"key": "tags", "match": {"any": tags_normalized}}]
+                }
+
+            async with httpx.AsyncClient() as http_client:
+                if query:
+                    # Vector search with filter
+                    endpoint = f"http://{settings.qdrant_host}:{settings.qdrant_port}/collections/{collection_name}/points/search"
+                else:
+                    # Scroll with filter (no vector)
+                    endpoint = f"http://{settings.qdrant_host}:{settings.qdrant_port}/collections/{collection_name}/points/scroll"
+                    search_body["limit"] = limit
+
+                response = await http_client.post(endpoint, json=search_body, timeout=30.0)
+                data = response.json()
+
+            results_key = "result" if query else "result"
+            if results_key not in data:
+                return []
+
+            results = data[results_key]
+            if isinstance(results, dict) and "points" in results:
+                results = results["points"]
+
+            return [
+                {
+                    "score": hit.get("score", 1.0),
+                    "payload": hit.get("payload", {}),
+                    "id": hit.get("id"),
+                }
+                for hit in results
+            ][:limit]
+
+        except Exception as e:
+            logger.warning("Tag search failed", collection=collection, error=str(e))
+            return []
 
     async def delete_embedding(self, collection: str, point_id: str) -> bool:
         """Delete an embedding from a collection."""

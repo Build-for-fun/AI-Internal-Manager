@@ -116,8 +116,24 @@ class HierarchyManager:
         embedding_id: str | None = None,
         importance: float = 0.5,
         metadata: dict[str, Any] | None = None,
+        tags: list[str] | None = None,
+        additional_topic_ids: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Add a context (knowledge piece) to a topic."""
+        """Add a context (knowledge piece) to a topic.
+
+        Args:
+            topic_id: Primary topic for this context
+            title: Context title
+            content: The actual knowledge content
+            source_type: Source type (jira, github, slack, document)
+            source_id: Original source identifier
+            source_url: Optional URL to source
+            embedding_id: Reference to vector store
+            importance: Importance score (0-1)
+            metadata: Additional metadata
+            tags: Cross-cutting tags (e.g., ["security", "api-design"])
+            additional_topic_ids: Additional topics this context belongs to (many-to-many)
+        """
         properties = {
             "id": str(uuid4()),
             "title": title,
@@ -132,12 +148,23 @@ class HierarchyManager:
         }
         node = await neo4j_client.create_node(NodeLabels.CONTEXT, properties)
 
-        # Create relationship
+        # Create primary relationship
         await neo4j_client.create_relationship(
             topic_id,
             node["id"],
             RelationshipTypes.HAS_CONTEXT,
         )
+
+        # Add to additional topics (many-to-many)
+        if additional_topic_ids:
+            await neo4j_client.add_context_to_multiple_topics(
+                node["id"],
+                [topic_id] + additional_topic_ids,
+            )
+
+        # Add tags for cross-cutting concerns
+        if tags:
+            await neo4j_client.add_tags_to_node(node["id"], tags)
 
         # Update topic's last_updated_context
         await neo4j_client.update_node(
@@ -151,6 +178,8 @@ class HierarchyManager:
             context_id=node.get("id"),
             topic_id=topic_id,
             source_type=source_type,
+            tags=tags,
+            additional_topics=additional_topic_ids,
         )
         return node
 
@@ -434,6 +463,132 @@ class HierarchyManager:
                 {**dict(r["t"]), "subdepartment": r.get("subdepartment")}
                 for r in records
             ]
+
+
+    # ============================================
+    # Hybrid Knowledge Management
+    # ============================================
+
+    async def add_tag_to_topic(
+        self,
+        topic_id: str,
+        tag_name: str,
+        tag_category: str = "general",
+    ) -> dict[str, Any]:
+        """Add a tag to a topic for cross-cutting organization."""
+        results = await neo4j_client.add_tags_to_node(topic_id, [tag_name])
+        if results:
+            logger.info("Tagged topic", topic_id=topic_id, tag=tag_name)
+            return results[0]
+        return {}
+
+    async def create_topic_cross_reference(
+        self,
+        topic_id_1: str,
+        topic_id_2: str,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """Create a cross-reference between two related topics.
+
+        This enables navigation between related topics across the hierarchy.
+        For example: "Authentication" in Engineering could cross-reference
+        "Security Policies" in Compliance.
+        """
+        result = await neo4j_client.create_cross_reference(
+            topic_id_1,
+            topic_id_2,
+            description=description,
+            bidirectional=True,
+        )
+
+        logger.info(
+            "Created topic cross-reference",
+            topic_1=topic_id_1,
+            topic_2=topic_id_2,
+        )
+        return result
+
+    async def search_by_tags(
+        self,
+        tag_names: list[str],
+        node_type: str | None = None,
+        require_all_tags: bool = False,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Search for knowledge by tags, bypassing hierarchy.
+
+        Args:
+            tag_names: Tags to search for
+            node_type: Optional filter (e.g., "Context", "Topic")
+            require_all_tags: If True, must have ALL tags. Otherwise ANY tag matches.
+            limit: Maximum results
+        """
+        return await neo4j_client.find_by_tags(
+            tag_names,
+            node_label=node_type,
+            match_all=require_all_tags,
+            limit=limit,
+        )
+
+    async def get_related_topics(self, topic_id: str) -> dict[str, Any]:
+        """Get all related content for a topic.
+
+        Returns:
+        - Cross-referenced topics
+        - Topics with shared tags
+        - Recent contexts
+        """
+        # Get direct cross-references
+        cross_refs = await neo4j_client.get_cross_references(topic_id)
+
+        # Get topic's tags
+        topic_tags = await neo4j_client.get_node_tags(topic_id)
+        tag_names = [t.get("name") for t in topic_tags if t.get("name")]
+
+        # Find other topics with same tags
+        related_by_tags = []
+        if tag_names:
+            results = await neo4j_client.find_by_tags(
+                tag_names,
+                node_label="Topic",
+                match_all=False,
+                limit=10,
+            )
+            # Filter out the current topic
+            related_by_tags = [r for r in results if r["node"].get("id") != topic_id]
+
+        # Get recent contexts
+        contexts = await self.get_contexts_for_topic(topic_id, limit=10)
+
+        return {
+            "cross_references": cross_refs,
+            "related_by_tags": related_by_tags,
+            "tags": topic_tags,
+            "recent_contexts": contexts,
+        }
+
+    async def global_search(
+        self,
+        query: str,
+        tags: list[str] | None = None,
+        source_types: list[str] | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Search across the entire knowledge base, bypassing hierarchy.
+
+        This is the primary search method for the hybrid approach,
+        allowing users to find knowledge without navigating the tree.
+        """
+        return await neo4j_client.search_across_hierarchy(
+            query_text=query,
+            tags=tags,
+            source_types=source_types,
+            limit=limit,
+        )
+
+    async def get_all_tags(self, category: str | None = None) -> list[dict[str, Any]]:
+        """Get all available tags for filtering."""
+        return await neo4j_client.get_all_tags(category)
 
 
 # Singleton instance

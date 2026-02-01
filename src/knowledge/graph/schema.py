@@ -32,6 +32,7 @@ class NodeLabels(str, Enum):
     PERSON = "Person"
     PROJECT = "Project"
     DECISION = "Decision"
+    TAG = "Tag"  # Cross-cutting concern tags (e.g., "security", "performance", "onboarding")
 
 
 class RelationshipTypes(str, Enum):
@@ -42,6 +43,11 @@ class RelationshipTypes(str, Enum):
     HAS_TOPIC = "HAS_TOPIC"
     HAS_CONTEXT = "HAS_CONTEXT"
     HAS_SUMMARY = "HAS_SUMMARY"
+
+    # Cross-cutting relationships (Hybrid approach)
+    HAS_TAG = "HAS_TAG"  # Context/Topic can have multiple tags
+    CROSS_REFERENCES = "CROSS_REFERENCES"  # Topic-to-Topic cross-references
+    ALSO_IN = "ALSO_IN"  # Context belongs to multiple topics (many-to-many)
 
     # Entity relationships
     MENTIONS = "MENTIONS"
@@ -183,6 +189,20 @@ class DecisionNode(BaseNode):
     source_url: str | None = None
 
 
+@dataclass
+class TagNode(BaseNode):
+    """Tag node for cross-cutting concerns.
+
+    Tags allow knowledge to be organized across the hierarchy.
+    Examples: "security", "performance", "onboarding", "compliance", "api-design"
+    """
+
+    name: str = ""  # Canonical tag name (lowercase, hyphenated)
+    category: str = ""  # "technical", "process", "domain", "team"
+    description: str | None = None
+    color: str | None = None  # For UI display (e.g., "#FF5733")
+
+
 # Schema creation queries
 SCHEMA_CONSTRAINTS = [
     # Unique constraints
@@ -195,8 +215,10 @@ SCHEMA_CONSTRAINTS = [
     "CREATE CONSTRAINT person_id IF NOT EXISTS FOR (p:Person) REQUIRE p.id IS UNIQUE",
     "CREATE CONSTRAINT project_id IF NOT EXISTS FOR (p:Project) REQUIRE p.id IS UNIQUE",
     "CREATE CONSTRAINT decision_id IF NOT EXISTS FOR (d:Decision) REQUIRE d.id IS UNIQUE",
-    # Person email unique
+    "CREATE CONSTRAINT tag_id IF NOT EXISTS FOR (t:Tag) REQUIRE t.id IS UNIQUE",
+    # Unique name constraints
     "CREATE CONSTRAINT person_email IF NOT EXISTS FOR (p:Person) REQUIRE p.email IS UNIQUE",
+    "CREATE CONSTRAINT tag_name IF NOT EXISTS FOR (t:Tag) REQUIRE t.name IS UNIQUE",
 ]
 
 SCHEMA_INDEXES = [
@@ -210,4 +232,7 @@ SCHEMA_INDEXES = [
     "CREATE INDEX summary_type IF NOT EXISTS FOR (s:Summary) ON (s.summary_type)",
     "CREATE INDEX person_department IF NOT EXISTS FOR (p:Person) ON (p.department_id)",
     "CREATE INDEX project_status IF NOT EXISTS FOR (p:Project) ON (p.status)",
+    # Tag indexes for cross-cutting searches
+    "CREATE INDEX tag_name IF NOT EXISTS FOR (t:Tag) ON (t.name)",
+    "CREATE INDEX tag_category IF NOT EXISTS FOR (t:Tag) ON (t.category)",
 ]

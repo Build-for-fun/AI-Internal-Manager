@@ -486,5 +486,380 @@ class Neo4jClient:
         return context
 
 
+    # ============================================
+    # Hybrid Knowledge Management (Tags & Cross-References)
+    # ============================================
+
+    async def create_tag(
+        self,
+        name: str,
+        category: str = "general",
+        description: str | None = None,
+        color: str | None = None,
+    ) -> dict[str, Any]:
+        """Create or get a tag for cross-cutting concerns.
+
+        Tags enable knowledge organization across the hierarchy.
+        Examples: "security", "performance", "api-design", "onboarding"
+        """
+        # Normalize tag name (lowercase, hyphenated)
+        normalized_name = name.lower().replace(" ", "-").replace("_", "-")
+
+        query = """
+        MERGE (t:Tag {name: $name})
+        ON CREATE SET
+            t.id = $id,
+            t.title = $title,
+            t.category = $category,
+            t.description = $description,
+            t.color = $color,
+            t.created_at = datetime(),
+            t.updated_at = datetime()
+        ON MATCH SET
+            t.updated_at = datetime()
+        RETURN t
+        """
+
+        async with self.driver.session() as session:
+            result = await session.run(
+                query,
+                name=normalized_name,
+                id=str(uuid4()),
+                title=name,
+                category=category,
+                description=description,
+                color=color,
+            )
+            record = await result.single()
+            return dict(record["t"]) if record else {}
+
+    async def add_tags_to_node(
+        self,
+        node_id: str,
+        tag_names: list[str],
+    ) -> list[dict[str, Any]]:
+        """Add multiple tags to a node (Context, Topic, or any other node).
+
+        Creates tags if they don't exist.
+        """
+        results = []
+        for tag_name in tag_names:
+            # Ensure tag exists
+            tag = await self.create_tag(tag_name)
+
+            # Create HAS_TAG relationship
+            query = """
+            MATCH (n {id: $node_id})
+            MATCH (t:Tag {name: $tag_name})
+            MERGE (n)-[r:HAS_TAG]->(t)
+            ON CREATE SET r.created_at = datetime()
+            RETURN n, t, r
+            """
+
+            normalized_name = tag_name.lower().replace(" ", "-").replace("_", "-")
+            async with self.driver.session() as session:
+                result = await session.run(
+                    query,
+                    node_id=node_id,
+                    tag_name=normalized_name,
+                )
+                record = await result.single()
+                if record:
+                    results.append({
+                        "node": dict(record["n"]),
+                        "tag": dict(record["t"]),
+                    })
+
+        return results
+
+    async def get_node_tags(self, node_id: str) -> list[dict[str, Any]]:
+        """Get all tags for a node."""
+        query = """
+        MATCH (n {id: $node_id})-[:HAS_TAG]->(t:Tag)
+        RETURN t
+        ORDER BY t.name
+        """
+
+        async with self.driver.session() as session:
+            result = await session.run(query, node_id=node_id)
+            records = await result.data()
+            return [dict(r["t"]) for r in records]
+
+    async def find_by_tags(
+        self,
+        tag_names: list[str],
+        node_label: str | None = None,
+        match_all: bool = False,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """Find nodes by tags, bypassing the hierarchy.
+
+        Args:
+            tag_names: List of tag names to search for
+            node_label: Optional node label filter (e.g., "Context", "Topic")
+            match_all: If True, node must have ALL tags. If False, ANY tag matches.
+            limit: Maximum results to return
+        """
+        normalized_tags = [t.lower().replace(" ", "-").replace("_", "-") for t in tag_names]
+
+        if match_all:
+            # Node must have ALL specified tags
+            label_filter = f":{node_label}" if node_label else ""
+            query = f"""
+            MATCH (n{label_filter})-[:HAS_TAG]->(t:Tag)
+            WHERE t.name IN $tags
+            WITH n, collect(DISTINCT t.name) as node_tags
+            WHERE size([tag IN $tags WHERE tag IN node_tags]) = size($tags)
+            RETURN n, node_tags as tags
+            LIMIT $limit
+            """
+        else:
+            # Node can have ANY of the specified tags
+            label_filter = f":{node_label}" if node_label else ""
+            query = f"""
+            MATCH (n{label_filter})-[:HAS_TAG]->(t:Tag)
+            WHERE t.name IN $tags
+            WITH n, collect(DISTINCT t.name) as node_tags, count(DISTINCT t) as tag_count
+            RETURN n, node_tags as tags
+            ORDER BY tag_count DESC
+            LIMIT $limit
+            """
+
+        async with self.driver.session() as session:
+            result = await session.run(query, tags=normalized_tags, limit=limit)
+            records = await result.data()
+            return [{"node": dict(r["n"]), "tags": r["tags"]} for r in records]
+
+    async def create_cross_reference(
+        self,
+        topic_id_1: str,
+        topic_id_2: str,
+        description: str | None = None,
+        bidirectional: bool = True,
+    ) -> dict[str, Any]:
+        """Create a cross-reference between two topics.
+
+        This enables navigation between related topics across the hierarchy.
+        """
+        query = """
+        MATCH (t1:Topic {id: $topic_id_1})
+        MATCH (t2:Topic {id: $topic_id_2})
+        MERGE (t1)-[r:CROSS_REFERENCES]->(t2)
+        ON CREATE SET
+            r.id = $id,
+            r.description = $description,
+            r.created_at = datetime()
+        RETURN t1, t2, r
+        """
+
+        async with self.driver.session() as session:
+            result = await session.run(
+                query,
+                topic_id_1=topic_id_1,
+                topic_id_2=topic_id_2,
+                id=str(uuid4()),
+                description=description,
+            )
+            record = await result.single()
+
+            # Create reverse relationship if bidirectional
+            if bidirectional:
+                reverse_query = """
+                MATCH (t1:Topic {id: $topic_id_1})
+                MATCH (t2:Topic {id: $topic_id_2})
+                MERGE (t2)-[r:CROSS_REFERENCES]->(t1)
+                ON CREATE SET
+                    r.id = $id,
+                    r.description = $description,
+                    r.created_at = datetime()
+                RETURN r
+                """
+                await session.run(
+                    reverse_query,
+                    topic_id_1=topic_id_1,
+                    topic_id_2=topic_id_2,
+                    id=str(uuid4()),
+                    description=description,
+                )
+
+            if record:
+                return {
+                    "topic_1": dict(record["t1"]),
+                    "topic_2": dict(record["t2"]),
+                    "relationship": dict(record["r"]),
+                }
+            return {}
+
+    async def get_cross_references(self, topic_id: str) -> list[dict[str, Any]]:
+        """Get all topics that cross-reference with a given topic."""
+        query = """
+        MATCH (t:Topic {id: $topic_id})-[r:CROSS_REFERENCES]-(other:Topic)
+        OPTIONAL MATCH (other)<-[:HAS_TOPIC]-(sd:SubDepartment)<-[:HAS_SUBDEPARTMENT]-(d:Department)
+        RETURN other, r.description as description, d.title as department, sd.title as subdepartment
+        """
+
+        async with self.driver.session() as session:
+            result = await session.run(query, topic_id=topic_id)
+            records = await result.data()
+            return [
+                {
+                    "topic": dict(r["other"]),
+                    "description": r["description"],
+                    "department": r["department"],
+                    "subdepartment": r["subdepartment"],
+                }
+                for r in records
+            ]
+
+    async def add_context_to_multiple_topics(
+        self,
+        context_id: str,
+        topic_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        """Link a context to multiple topics (many-to-many).
+
+        The first topic uses HAS_CONTEXT, additional topics use ALSO_IN.
+        """
+        results = []
+        for i, topic_id in enumerate(topic_ids):
+            rel_type = "HAS_CONTEXT" if i == 0 else "ALSO_IN"
+            query = f"""
+            MATCH (t:Topic {{id: $topic_id}})
+            MATCH (c:Context {{id: $context_id}})
+            MERGE (t)-[r:{rel_type}]->(c)
+            ON CREATE SET r.created_at = datetime()
+            RETURN t, c, r
+            """
+
+            async with self.driver.session() as session:
+                result = await session.run(
+                    query,
+                    topic_id=topic_id,
+                    context_id=context_id,
+                )
+                record = await result.single()
+                if record:
+                    results.append({
+                        "topic": dict(record["t"]),
+                        "context": dict(record["c"]),
+                        "relationship_type": rel_type,
+                    })
+
+        return results
+
+    async def get_context_topics(self, context_id: str) -> list[dict[str, Any]]:
+        """Get all topics a context belongs to (including ALSO_IN relationships)."""
+        query = """
+        MATCH (t:Topic)-[:HAS_CONTEXT|ALSO_IN]->(c:Context {id: $context_id})
+        OPTIONAL MATCH (t)<-[:HAS_TOPIC]-(sd:SubDepartment)<-[:HAS_SUBDEPARTMENT]-(d:Department)
+        RETURN t, d.title as department, sd.title as subdepartment
+        """
+
+        async with self.driver.session() as session:
+            result = await session.run(query, context_id=context_id)
+            records = await result.data()
+            return [
+                {
+                    "topic": dict(r["t"]),
+                    "department": r["department"],
+                    "subdepartment": r["subdepartment"],
+                }
+                for r in records
+            ]
+
+    async def search_across_hierarchy(
+        self,
+        query_text: str,
+        tags: list[str] | None = None,
+        source_types: list[str] | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """Search knowledge across the entire hierarchy.
+
+        This bypasses the hierarchical navigation and searches directly,
+        optionally filtering by tags and source types.
+        """
+        # Build filter conditions
+        conditions = ["toLower(c.content) CONTAINS toLower($query) OR toLower(c.title) CONTAINS toLower($query)"]
+        params: dict[str, Any] = {"query": query_text, "limit": limit}
+
+        if source_types:
+            conditions.append("c.source_type IN $source_types")
+            params["source_types"] = source_types
+
+        where_clause = " AND ".join(conditions)
+
+        if tags:
+            normalized_tags = [t.lower().replace(" ", "-").replace("_", "-") for t in tags]
+            params["tags"] = normalized_tags
+            query = f"""
+            MATCH (c:Context)-[:HAS_TAG]->(tag:Tag)
+            WHERE tag.name IN $tags AND ({where_clause})
+            OPTIONAL MATCH (t:Topic)-[:HAS_CONTEXT|ALSO_IN]->(c)
+            OPTIONAL MATCH (t)<-[:HAS_TOPIC]-(sd:SubDepartment)<-[:HAS_SUBDEPARTMENT]-(d:Department)
+            WITH c, collect(DISTINCT tag.name) as tags, collect(DISTINCT t.title) as topics,
+                 collect(DISTINCT d.title) as departments
+            RETURN c, tags, topics, departments
+            ORDER BY c.importance DESC, c.created_at DESC
+            LIMIT $limit
+            """
+        else:
+            query = f"""
+            MATCH (c:Context)
+            WHERE {where_clause}
+            OPTIONAL MATCH (c)-[:HAS_TAG]->(tag:Tag)
+            OPTIONAL MATCH (t:Topic)-[:HAS_CONTEXT|ALSO_IN]->(c)
+            OPTIONAL MATCH (t)<-[:HAS_TOPIC]-(sd:SubDepartment)<-[:HAS_SUBDEPARTMENT]-(d:Department)
+            WITH c, collect(DISTINCT tag.name) as tags, collect(DISTINCT t.title) as topics,
+                 collect(DISTINCT d.title) as departments
+            RETURN c, tags, topics, departments
+            ORDER BY c.importance DESC, c.created_at DESC
+            LIMIT $limit
+            """
+
+        async with self.driver.session() as session:
+            result = await session.run(query, **params)
+            records = await result.data()
+            return [
+                {
+                    "context": dict(r["c"]),
+                    "tags": r["tags"],
+                    "topics": r["topics"],
+                    "departments": r["departments"],
+                }
+                for r in records
+            ]
+
+    async def get_all_tags(self, category: str | None = None) -> list[dict[str, Any]]:
+        """Get all tags, optionally filtered by category."""
+        if category:
+            query = """
+            MATCH (t:Tag {category: $category})
+            OPTIONAL MATCH (n)-[:HAS_TAG]->(t)
+            RETURN t, count(n) as usage_count
+            ORDER BY usage_count DESC, t.name
+            """
+            params = {"category": category}
+        else:
+            query = """
+            MATCH (t:Tag)
+            OPTIONAL MATCH (n)-[:HAS_TAG]->(t)
+            RETURN t, count(n) as usage_count
+            ORDER BY usage_count DESC, t.name
+            """
+            params = {}
+
+        async with self.driver.session() as session:
+            result = await session.run(query, **params)
+            records = await result.data()
+            return [
+                {
+                    "tag": dict(r["t"]),
+                    "usage_count": r["usage_count"],
+                }
+                for r in records
+            ]
+
+
 # Singleton instance
 neo4j_client = Neo4jClient()
